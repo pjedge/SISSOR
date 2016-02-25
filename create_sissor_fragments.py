@@ -38,7 +38,7 @@ def create_sissor_fragments(sissor_vcf_file, bed_file, hapcut_block_file, pileup
     # create a list of (chromosome, pos) tuples specifying each allele present in hapcut haplotype
     snp_indices_unsorted = []
     # want a set too for fast lookup
-    snp_indices_set      = {}
+    snp_indices_set      = set()
 
     with open(hapcut_block_file, 'r') as infile:
 
@@ -81,6 +81,9 @@ def create_sissor_fragments(sissor_vcf_file, bed_file, hapcut_block_file, pileup
     with open(pileup_file, 'r') as infile:
 
         for line in infile:
+
+            if len(line) < 3:
+                continue
 
             # read line elements
             el    = line.strip().split()

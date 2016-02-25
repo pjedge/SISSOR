@@ -19,8 +19,7 @@ def parse_args():
 
 def get_covered_positions(hapcut_block_file, pileup_file, output_file):
 
-    # want a set too for fast lookup
-    snp_indices_set      = {}
+    snp_indices_set = set()
 
     with open(hapcut_block_file, 'r') as infile:
 
@@ -32,7 +31,7 @@ def get_covered_positions(hapcut_block_file, pileup_file, output_file):
             pos   = int(el[4])-1
             snp_indices_set.add((chrom,pos))
 
-    nonrefs = set()
+    covered = set()
     with open(pileup_file, 'r') as infile:
 
         for line in infile:
@@ -47,11 +46,11 @@ def get_covered_positions(hapcut_block_file, pileup_file, output_file):
             # filter on quality and depth
             # we only care about this position if it's also in the HapCUT block file
             if qual >= 30 and depth >= 5 and (chrom, pos) in snp_indices_set:
-                nonrefs.add((chrom,pos))
+                covered.add((chrom,pos))
 
     with open(output_file,'w') as opf:
 
-        for chrom, pos in nonrefs:
+        for chrom, pos in covered:
 
             print("{}\t{}".format(chrom, pos),file=opf)
 
