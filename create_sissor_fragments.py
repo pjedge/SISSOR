@@ -54,6 +54,24 @@ def create_sissor_fragments(sissor_vcf_file, bed_file, hapcut_block_file, pileup
 
     snp_indices = sorted(snp_indices_unsorted, key=lambda tup: tup[0])
 
+    covered = set()
+    if pileup_file != None:
+        with open(pileup_file, 'r') as infile:
+
+            for line in infile:
+
+                # read line elements
+                el    = line.strip().split()
+                chrom = el[0]
+                pos   = int(el[1])-1
+                qual  = int(el[4])
+                depth = int(el[7])
+
+                # filter on quality and depth
+                # we only care about this position if it's also in the HapCUT block file
+                if qual >= 30 and depth >= 5 and (chrom, pos) in snp_indices_set:
+                    covered.add((chrom,pos))
+
     # create a list where each element is a list A corresponding to a bed region
     # each A contains tuples for each snp found in the hapcut haplotype that falls in the region
     frag_snps = [[] for i in bed_data]
@@ -72,27 +90,23 @@ def create_sissor_fragments(sissor_vcf_file, bed_file, hapcut_block_file, pileup
             snp_ix, snp_chrom, snp_pos = snp_indices.pop(0)
         # add SNPs inside current bed region to fs
         while snp_chrom == chrom and p1 <= snp_pos and snp_pos <= p2 and snp_indices != []:
-            frag_snps[i].append((snp_ix, snp_chrom, snp_pos, '0'))
+            if (snp_chrom, snp_pos) in covered:
+                frag_snps[i].append((snp_ix, snp_chrom, snp_pos, '0'))
             snp_ix, snp_chrom, snp_pos = snp_indices.pop(0)
 
-    # create a set of indices from the pileup VCF where the non-reference alleles are found
+    # create a set of indices from the haploid SISSOR VCF where the non-reference alleles are found
 
     nonrefs = set()
-    with open(pileup_file, 'r') as infile:
+    with open(sissor_vcf_file, 'r') as infile:
 
         for line in infile:
+            if line[0] == '#' or len(line) < 2:
+                continue
 
-            # read line elements
-            el    = line.strip().split()
+            el = line.strip().split()
             chrom = el[0]
             pos   = int(el[1])-1
-            qual  = int(el[4])
-            depth = int(el[7])
-
-            # filter on quality and depth
-            # we only care about this position if it's also in the HapCUT block file
-            if qual >= 30 and depth >= 5 and (chrom, pos) in snp_indices_set:
-                nonrefs.add((chrom,pos))
+            nonrefs.add((chrom,pos))
 
     # go through our list of fragment SNP indices and use the set of nonref alleles
     # to mark each nonreference position as such
