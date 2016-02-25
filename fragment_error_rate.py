@@ -96,7 +96,6 @@ def single_fragment_error_rate(hapcut_blks, frag, switch_threshold=10):
                     # count the 2 switches as a single-base mismatch instead
                     mismatches[a] += 1
                     switches[a] -= 1      # undo count from last base switch
-                    print("Flip at {}".format(frag_pos+1))
 
                     if (switches[a] < 0):
                         switches[a] = 0
@@ -105,7 +104,6 @@ def single_fragment_error_rate(hapcut_blks, frag, switch_threshold=10):
                 else:
 
                     switches[a] += 1
-                    print("Switch at {}".format(frag_pos+1))
 
                     last_base_was_switch = True
 
@@ -120,13 +118,9 @@ def single_fragment_error_rate(hapcut_blks, frag, switch_threshold=10):
             mismatches[a] += 1
             switches[a] -= 1
 
-            print("Flip at {}".format(frag_pos+1))
-
             if (switches[a] < 0):
                 switches[a] = 0
 
-        print("*****************")
-        
     if switches[0] < switches[1]:
         return (switches[0], mismatches[0], comparisons, blocknum)
     else:
