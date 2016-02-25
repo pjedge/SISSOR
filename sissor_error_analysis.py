@@ -19,6 +19,7 @@ def parse_args():
     parser.add_argument('sissor_vcf_file', nargs='?', type = str, help='path to haploid vcf file. present alleles are variant calls. missing alleles are assumed to be ref')
     parser.add_argument('bed_file', nargs='?', type = str, help='bed file where each entry specifies the boundary of a SISSOR fragment')
     parser.add_argument('hapcut_block_file', nargs='?', type = str, help='path to hapcut block file')
+    parser.add_argument('pileup_file', nargs='?', type = str, help='oldschool samtools pileup file from SISSOR raw reads for determining positions with coverage >= 5 and quality >= 30')
     parser.add_argument('filtered_hapcut_block_file', nargs='?', type = str, help='path to write filtered hapcut block file to')
     parser.add_argument('intermediate_fragment_file', nargs='?', type = str, help='path to write intermediate fragment matrix file')
     parser.add_argument('output_file', nargs='?', type = str, help='path to write error analysis output')
@@ -31,13 +32,13 @@ def parse_args():
     args = parser.parse_args()
     return args
 
-def sissor_error_analysis(sissor_vcf_file, bed_file, hapcut_block_file, filtered_hapcut_block_file, intermediate_fragment_file, output_file):
+def sissor_error_analysis(sissor_vcf_file, bed_file, hapcut_block_file, pileup_file, filtered_hapcut_block_file, intermediate_fragment_file, output_file):
 
     filter_hapblock_file(hapcut_block_file, filtered_hapcut_block_file)
-    create_sissor_fragments(sissor_vcf_file, bed_file, filtered_hapcut_block_file, intermediate_fragment_file)
+    create_sissor_fragments(sissor_vcf_file, bed_file, filtered_hapcut_block_file, pileup_file, intermediate_fragment_file)
     fragment_error_rate(intermediate_fragment_file, filtered_hapcut_block_file, output_file)
 
 # parse args and execute main function
 if __name__ == '__main__':
     args = parse_args()
-    sissor_error_analysis(args.sissor_vcf_file, args.bed_file, args.hapcut_block_file, args.filtered_hapcut_block_file, args.intermediate_fragment_file, args.output_file)
+    sissor_error_analysis(args.sissor_vcf_file, args.bed_file, args.hapcut_block_file, args.pileup_file, args.filtered_hapcut_block_file, args.intermediate_fragment_file, args.output_file)

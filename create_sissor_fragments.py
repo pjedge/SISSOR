@@ -15,6 +15,7 @@ def parse_args():
     parser.add_argument('sissor_vcf_file', nargs='?', type = str, help='path to haploid vcf file. present alleles are variant calls. missing alleles are assumed to be ref')
     parser.add_argument('bed_file', nargs='?', type = str, help='bed file where each entry specifies the boundary of a SISSOR fragment')
     parser.add_argument('hapcut_block_file', nargs='?', type = str, help='path to hapcut block file')
+    parser.add_argument('pileup_file', nargs='?', type = str, help='oldschool samtools pileup file from SISSOR raw reads for determining positions with coverage >= 5 and quality >= 30')
     parser.add_argument('output_fragment_file', nargs='?', type = str, help='path to result fragment file')
     # default to help option. credit to unutbu: http://stackoverflow.com/questions/4042452/display-help-message-with-python-argparse-when-script-is-called-without-any-argu
     if len(sys.argv) < 5:
@@ -24,7 +25,7 @@ def parse_args():
     args = parser.parse_args()
     return args
 
-def create_sissor_fragments(sissor_vcf_file, bed_file, hapcut_block_file, output_fragment_file):
+def create_sissor_fragments(sissor_vcf_file, bed_file, hapcut_block_file, pileup_file, output_fragment_file):
 
     # read bed file boundaries into a list structure
     bed_data = []
@@ -36,6 +37,9 @@ def create_sissor_fragments(sissor_vcf_file, bed_file, hapcut_block_file, output
 
     # create a list of (chromosome, pos) tuples specifying each allele present in hapcut haplotype
     snp_indices_unsorted = []
+    # want a set too for fast lookup
+    snp_indices_set      = {}
+
     with open(hapcut_block_file, 'r') as infile:
 
         for line in infile:
@@ -46,7 +50,7 @@ def create_sissor_fragments(sissor_vcf_file, bed_file, hapcut_block_file, output
             chrom = el[3]
             pos   = int(el[4])-1
             snp_indices_unsorted.append((ix,chrom,pos))
-
+            snp_indices_set.add((chrom,pos))
 
     snp_indices = sorted(snp_indices_unsorted, key=lambda tup: tup[0])
 
@@ -71,19 +75,24 @@ def create_sissor_fragments(sissor_vcf_file, bed_file, hapcut_block_file, output
             frag_snps[i].append((snp_ix, snp_chrom, snp_pos, '0'))
             snp_ix, snp_chrom, snp_pos = snp_indices.pop(0)
 
-    # create a set of indices from the haploid SISSOR VCF where the non-reference alleles are found
+    # create a set of indices from the pileup VCF where the non-reference alleles are found
 
     nonrefs = set()
-    with open(sissor_vcf_file, 'r') as infile:
+    with open(pileup_file, 'r') as infile:
 
         for line in infile:
-            if line[0] == '#' or len(line) < 2:
-                continue
 
-            el = line.strip().split()
+            # read line elements
+            el    = line.strip().split()
             chrom = el[0]
             pos   = int(el[1])-1
-            nonrefs.add((chrom,pos))
+            qual  = int(el[4])
+            depth = int(el[7])
+
+            # filter on quality and depth
+            # we only care about this position if it's also in the HapCUT block file
+            if qual >= 30 and depth >= 5 and (chrom, pos) in snp_indices_set:
+                nonrefs.add((chrom,pos))
 
     # go through our list of fragment SNP indices and use the set of nonref alleles
     # to mark each nonreference position as such
@@ -127,4 +136,4 @@ def create_sissor_fragments(sissor_vcf_file, bed_file, hapcut_block_file, output
 # parse args and execute main function
 if __name__ == '__main__':
     args = parse_args()
-    create_sissor_fragments(args.sissor_vcf_file, args.bed_file, args.hapcut_block_file, args.output_fragment_file)
+    create_sissor_fragments(args.sissor_vcf_file, args.bed_file, args.hapcut_block_file, args.pileup_file, args.output_fragment_file)
