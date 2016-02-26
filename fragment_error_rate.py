@@ -16,7 +16,7 @@ def single_fragment_error_rate(hapcut_blks, frag):
     # build a dictionary for rapid indexing into the hapcut block list
     ix_dict = {}
     for i, blk in enumerate(hapcut_blks):
-        for j, (chrom, ix, a1, a2) in enumerate(blk):
+        for j, (chrom, ix, pos, a1, a2) in enumerate(blk):
             ix_dict[(chrom,ix)] = (i,j) # for a given SNP index, save the block number, and block index where we can find it
 
     # iterate over SNPs in the true and assembled haplotypes in parallel
@@ -28,7 +28,7 @@ def single_fragment_error_rate(hapcut_blks, frag):
         if (chrom,ix) not in ix_dict:
             continue
         i,j = ix_dict[(chrom,ix)]
-        if hapcut_blks[i][j][1] in ['0','1']:
+        if hapcut_blks[i][j][3] in ['0','1']:
             visited_blocks.add(i)
 
     blocknum = len(visited_blocks)
@@ -50,7 +50,7 @@ def single_fragment_error_rate(hapcut_blks, frag):
             i, j = ix_dict[(frag.chrom,frag_ix)]
 
             y = frag_allele
-            x = hapcut_blks[i][j][1+a]
+            x = hapcut_blks[i][j][3+a]
 
             if x == '-' or y == '-':
                 continue # skip cases where fragment or known haplotype are missing data
@@ -105,46 +105,8 @@ def single_fragment_error_rate(hapcut_blks, frag):
     else:
         return (switches[1], mismatches[1], comparisons, blocknum)
 
-# parses a hapcut block file into a useful data structure
-# list of lists of tuples
-# each inner list represents
-def parse_hapblock_file(hapblock_file):
-
-    blocklist = []
-
-    with open(hapblock_file, 'r') as hbf:
-
-        for line in hbf:
-            if 'BLOCK' in line:
-                blocklist.append([])
-                continue
-
-            el = line.strip().split('\t')
-            if len(el) < 3:
-                continue
-
-            last_el  = el[-1]
-            el2 = last_el.split(':')
-            last_el2 = el2[-1]
-
-            # we want to filter out lines that end in FV or whose last column's
-            # last number is > 2.0
-            if last_el2 == 'FV' or float(last_el2) < 2.0:
-                continue
-
-            chrom   = el[3]
-            pos     = int(el[0])-1
-            allele1 = el[1]
-            allele2 = el[2]
-
-            blocklist[-1].append((chrom, pos, allele1, allele2))
-
-    return blocklist
-
 # main function
-def fragment_error_rate(frag_list, hapblock_file, output_file):
-
-    hapcut_blks = parse_hapblock_file(hapblock_file)
+def fragment_error_rate(frag_list, hapblock_list, output_file):
 
     with open(output_file, 'w') as outfile:
 
@@ -154,5 +116,5 @@ def fragment_error_rate(frag_list, hapblock_file, output_file):
         for frag in frag_list:
 
             # compute error rate and print
-            switch_count, mismatch_count, comparisons, block_num = single_fragment_error_rate(hapcut_blks, frag)
+            switch_count, mismatch_count, comparisons, block_num = single_fragment_error_rate(hapblock_list, frag)
             print("{}\t{}\t{}\t{}\t{}".format(frag.id, switch_count, mismatch_count,comparisons, block_num),file=outfile)

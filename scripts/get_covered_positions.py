@@ -33,9 +33,9 @@ def get_covered_positions(hapcut_block_file, pileup_file, output_file):
 
             # we want to filter out lines that end in FV or whose last column's
             # last number is > 2.0
-            if last_el2 == 'FV' or float(last_el2) < 2.0:
+            if last_el2 == 'FV' or float(last_el2) >= 2.0:
                 continue
-                
+
             chrom = el[3]
             pos   = int(el[4])-1
             snp_indices_set.add((chrom,pos))

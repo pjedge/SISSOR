@@ -11,7 +11,7 @@ class fragment:
         self.chrom = None
         self.seq   = [] # a list of (ix, pos, allele) tuples
 
-def create_sissor_fragments(sissor_vcf_file, bed_file, hapcut_block_file, pileup_file, covered_file):
+def create_sissor_fragments(sissor_vcf_file, bed_file, hapblock_list, pileup_file, covered_file):
 
     # read bed file boundaries into a list structure
     bed_data = []
@@ -25,29 +25,9 @@ def create_sissor_fragments(sissor_vcf_file, bed_file, hapcut_block_file, pileup
     # want a set too for fast lookup
     hapblock_file_snps = {}
 
-    with open(hapcut_block_file, 'r') as infile:
-
-        for line in infile:
-            if ('BLOCK' in line or '********' in line or len(line) < 2):
-                continue
-            el = line.strip().split()
-            last_el  = el[-1]
-            el2 = last_el.split(':')
-            last_el2 = el2[-1]
-
-            # we want to filter out lines that end in FV or whose last column's
-            # last number is > 2.0
-            if last_el2 == 'FV' or float(last_el2) < 2.0:
-                continue
-
-            chrom = el[3]
-            snp_ix = int(el[0])-1
-            pos   = int(el[4])-1
-
+    for block in hapblock_list:
+        for chrom, snp_ix, pos, a1, a2 in block:
             hapblock_file_snps[(chrom,pos)] = snp_ix
-
-    #import pdb
-    #pdb.set_trace()
 
     covered = set()
     if pileup_file != None:
@@ -104,11 +84,13 @@ def create_sissor_fragments(sissor_vcf_file, bed_file, hapcut_block_file, pileup
 
         # add SNPs inside current bed region to fs
         for pos in range(p1,p2+1):
-            if (chrom, pos) in covered:
+
+            if (chrom, pos) in covered and (chrom, pos) in hapblock_file_snps:
                 snp_ix = hapblock_file_snps[(chrom,pos)]
                 if (chrom, pos) in nonrefs:
                     frag_list[i].seq.append((snp_ix, pos, '1')) # mark this as a nonref allele
                 else:
                     frag_list[i].seq.append((snp_ix, pos, '0')) # mark this as a reference allele
+
 
     return frag_list

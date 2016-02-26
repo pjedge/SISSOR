@@ -29,10 +29,48 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+# parses a hapcut block file into a useful data structure
+# list of lists of tuples
+# each inner list represents
+def parse_hapblock_file(hapblock_file):
+
+    blocklist = []
+
+    with open(hapblock_file, 'r') as hbf:
+
+        for line in hbf:
+            if 'BLOCK' in line:
+                blocklist.append([])
+                continue
+
+            el = line.strip().split('\t')
+            if len(el) < 3:
+                continue
+
+            last_el  = el[-1]
+            el2 = last_el.split(':')
+            last_el2 = el2[-1]
+
+            # we want to filter out lines that end in FV or whose last column's
+            # last number is > 2.0
+            if last_el2 == 'FV' or float(last_el2) >= 2.0:
+                continue
+
+            chrom   = el[3]
+            ix      = int(el[0])-1
+            pos     = int(el[4])-1
+            allele1 = el[1]
+            allele2 = el[2]
+
+            blocklist[-1].append((chrom, ix, pos, allele1, allele2))
+
+    return blocklist
+
 def sissor_error_analysis(sissor_vcf_file, bed_file, hapcut_block_file, output_file, pileup_file, covered_file):
 
-    frag_list = create_sissor_fragments(sissor_vcf_file, bed_file, hapcut_block_file, pileup_file, covered_file)
-    fragment_error_rate(frag_list, hapcut_block_file, output_file)
+    hapblock_list = parse_hapblock_file(hapcut_block_file)
+    frag_list = create_sissor_fragments(sissor_vcf_file, bed_file, hapblock_list, pileup_file, covered_file)
+    fragment_error_rate(frag_list, hapblock_list, output_file)
 
 # parse args and execute main function
 if __name__ == '__main__':
