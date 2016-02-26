@@ -108,7 +108,4 @@ def create_sissor_fragments(sissor_vcf_file, bed_file, hapcut_block_file, pileup
                 else:
                     frag_list[i].seq.append((snp_ix, pos, '0')) # mark this as a reference allele
 
-    import pdb
-    pdb.set_trace()
-
     return frag_list
