@@ -46,6 +46,9 @@ def create_sissor_fragments(sissor_vcf_file, bed_file, hapcut_block_file, pileup
 
             hapblock_file_snps[(chrom,pos)] = snp_ix
 
+    #import pdb
+    #pdb.set_trace()
+
     covered = set()
     if pileup_file != None:
         with open(pileup_file, 'r') as infile:

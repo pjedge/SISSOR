@@ -119,14 +119,23 @@ def parse_hapblock_file(hapblock_file):
                 blocklist.append([])
                 continue
 
-            elements = line.strip().split('\t')
-            if len(elements) < 3:
+            el = line.strip().split('\t')
+            if len(el) < 3:
                 continue
 
-            chrom   = elements[3]
-            pos     = int(elements[0])-1
-            allele1 = elements[1]
-            allele2 = elements[2]
+            last_el  = el[-1]
+            el2 = last_el.split(':')
+            last_el2 = el2[-1]
+
+            # we want to filter out lines that end in FV or whose last column's
+            # last number is > 2.0
+            if last_el2 == 'FV' or float(last_el2) < 2.0:
+                continue
+
+            chrom   = el[3]
+            pos     = int(el[0])-1
+            allele1 = el[1]
+            allele2 = el[2]
 
             blocklist[-1].append((chrom, pos, allele1, allele2))
 
