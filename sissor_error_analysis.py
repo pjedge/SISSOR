@@ -66,7 +66,7 @@ def parse_hapblock_file(hapblock_file):
 
     return blocklist
 
-def sissor_error_analysis(sissor_vcf_file, bed_file, hapcut_block_file, output_file, pileup_file, covered_file):
+def sissor_error_analysis(sissor_vcf_file, bed_file, hapcut_block_file, output_file, pileup_file=None, covered_file=None):
 
     hapblock_list = parse_hapblock_file(hapcut_block_file)
     frag_list = create_sissor_fragments(sissor_vcf_file, bed_file, hapblock_list, pileup_file, covered_file)
