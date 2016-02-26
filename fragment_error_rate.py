@@ -3,33 +3,12 @@
 
 # Author : Peter Edge
 # Email  : pedge@eng.ucsd.edu
-import argparse
-import sys
-
-desc = '''computes the mismatch and switch error rates between fragments in a
-HapCUT format fragment file and a HapCUT hapblock file'''
-
-# parse arguments
-def parse_args():
-
-    parser = argparse.ArgumentParser(description='')
-    parser.add_argument('frag_file', nargs='?', type = str, help='path to fragment file')
-    parser.add_argument('hapcut_block_file', nargs='?', type = str, help='path to hapcut block file')
-    parser.add_argument('output_file', nargs='?', type = str, help='path to output_file')
-    print(len(sys.argv))
-    # default to help option. credit to unutbu: http://stackoverflow.com/questions/4042452/display-help-message-with-python-argparse-when-script-is-called-without-any-argu
-    if len(sys.argv) < 4:
-        parser.print_help()
-        sys.exit(1)
-
-    args = parser.parse_args()
-    return args
 
 # hapcut_blks is a list of blocks, represented as lists of (pos, allele1, allele2)
 # frags is a list of lists of (pos, allele)
-def single_fragment_error_rate(hapcut_blks, frag, switch_threshold=10):
+def single_fragment_error_rate(hapcut_blks, frag):
 
-    switched       = False
+    switched = False
     last_base_was_switch = False
     comparisons = 0
     blocknum = 0
@@ -37,18 +16,18 @@ def single_fragment_error_rate(hapcut_blks, frag, switch_threshold=10):
     # build a dictionary for rapid indexing into the hapcut block list
     ix_dict = {}
     for i, blk in enumerate(hapcut_blks):
-        for j, (pos, a1, a2) in enumerate(blk):
-            ix_dict[pos] = (i,j) # for a given SNP index, save the block and index where we can find it
+        for j, (chrom, ix, a1, a2) in enumerate(blk):
+            ix_dict[(chrom,ix)] = (i,j) # for a given SNP index, save the block number, and block index where we can find it
 
     # iterate over SNPs in the true and assembled haplotypes in parallel
     # i is the index of the current base. x is the current base in the true haplotype. y is the current base in the assembled haplotype.
 
     # figure out how many blocks are visited
     visited_blocks = set()
-    for frag_pos, frag_allele in frag:
-        if frag_pos not in ix_dict:
+    for ix, pos, allele in frag.seq:
+        if (chrom,ix) not in ix_dict:
             continue
-        i,j = ix_dict[frag_pos]
+        i,j = ix_dict[(chrom,ix)]
         if hapcut_blks[i][j][1] in ['0','1']:
             visited_blocks.add(i)
 
@@ -63,15 +42,15 @@ def single_fragment_error_rate(hapcut_blks, frag, switch_threshold=10):
 
         prev_block_ix  = -1
 
-        for frag_pos, frag_allele in frag:
+        for frag_ix, frag_pos, frag_allele in frag.seq:
 
-            if frag_pos not in ix_dict:
+            if (frag.chrom,frag_ix) not in ix_dict:
                 continue
 
-            blk_ix, snpblk_ix = ix_dict[frag_pos]
+            i, j = ix_dict[(frag.chrom,frag_ix)]
 
             y = frag_allele
-            x = hapcut_blks[blk_ix][snpblk_ix][1+a]
+            x = hapcut_blks[i][j][1+a]
 
             if x == '-' or y == '-':
                 continue # skip cases where fragment or known haplotype are missing data
@@ -79,10 +58,10 @@ def single_fragment_error_rate(hapcut_blks, frag, switch_threshold=10):
             if a == 0:
                 comparisons += 1
 
-            if blk_ix != prev_block_ix: # this is the first SNP in a new block
+            if i != prev_block_ix: # this is the first SNP in a new block
                 switched = (x != y)
                 last_base_was_switch = switched
-                prev_block_ix = blk_ix
+                prev_block_ix = i
                 continue
 
             # if there is a mismatch against the true haplotype and we are in a normal state,
@@ -96,7 +75,6 @@ def single_fragment_error_rate(hapcut_blks, frag, switch_threshold=10):
                     # count the 2 switches as a single-base mismatch instead
                     mismatches[a] += 1
                     switches[a] -= 1      # undo count from last base switch
-                    print("Flip at {}".format(frag_pos+1))
 
                     if (switches[a] < 0):
                         switches[a] = 0
@@ -105,14 +83,13 @@ def single_fragment_error_rate(hapcut_blks, frag, switch_threshold=10):
                 else:
 
                     switches[a] += 1
-                    print("Switch at {}".format(frag_pos+1))
 
                     last_base_was_switch = True
 
             else: # current base is not mismatched
                 last_base_was_switch = False
 
-            prev_block_ix = blk_ix
+            prev_block_ix = i
 
         # special case for switch on last base of previous block; should count as a mismatch
         if last_base_was_switch:
@@ -120,13 +97,9 @@ def single_fragment_error_rate(hapcut_blks, frag, switch_threshold=10):
             mismatches[a] += 1
             switches[a] -= 1
 
-            print("Flip at {}".format(frag_pos+1))
-
             if (switches[a] < 0):
                 switches[a] = 0
 
-        print("*****************")
-        
     if switches[0] < switches[1]:
         return (switches[0], mismatches[0], comparisons, blocknum)
     else:
@@ -139,70 +112,38 @@ def parse_hapblock_file(hapblock_file):
 
     blocklist = []
 
-    try:
-        with open(hapblock_file, 'r') as hbf:
+    with open(hapblock_file, 'r') as hbf:
 
-            for line in hbf:
-                if 'BLOCK' in line:
-                    blocklist.append([])
-                    continue
+        for line in hbf:
+            if 'BLOCK' in line:
+                blocklist.append([])
+                continue
 
-                elements = line.strip().split('\t')
-                if len(elements) < 3:
-                    continue
+            elements = line.strip().split('\t')
+            if len(elements) < 3:
+                continue
 
-                pos = int(elements[0])-1
-                allele1 = elements[1]
-                allele2 = elements[2]
+            chrom   = elements[3]
+            pos     = int(elements[0])-1
+            allele1 = elements[1]
+            allele2 = elements[2]
 
-                blocklist[-1].append((pos, allele1, allele2))
-
-    except FileNotFoundError:
-        # most of the time, this should mean that the program timed out and therefore didn't produce a phase.
-        pass
+            blocklist[-1].append((chrom, pos, allele1, allele2))
 
     return blocklist
 
-# takes a split line from a fragment file and converts it to a list of (pos,allele) tuples
-def fragdata2list(fragdata):
-
-    fraglist = []
-    frag_iter = iter(fragdata[2:-1])
-
-    for ix_str in frag_iter:
-        seq_str = next(frag_iter)
-        pos = int(ix_str) - 1
-
-        for i, allele in enumerate(seq_str):
-            fraglist.append((pos+i, allele))
-
-    return fraglist
-
 # main function
-def fragment_error_rate(frag_file, hapblock_file, output_file):
+def fragment_error_rate(frag_list, hapblock_file, output_file):
 
     hapcut_blks = parse_hapblock_file(hapblock_file)
 
-    with open(frag_file, 'r') as infile:
-        with open(output_file, 'w') as outfile:
+    with open(output_file, 'w') as outfile:
 
-            # output header
-            print("FRAG_ID\tSWITCH_COUNT\tMISMATCH_COUNT\tCOMPARISONS\tBLOCKS_OVERLAPPED\n",file=outfile)
+        # output header
+        print("FRAG_ID\tSWITCH_COUNT\tMISMATCH_COUNT\tCOMPARISONS\tBLOCKS_OVERLAPPED\n",file=outfile)
 
-            # processes each fragment
-            for line in infile:
-                if len(line) < 2:
-                    continue  # skip empty lines
+        for frag in frag_list:
 
-                frag_data = line.strip().split()   # split fragment data into list
-                frag = fragdata2list(frag_data)    # convert to more useful representation
-                frag_name = frag_data[1]           # fragment id
-
-                # compute error rate and print
-                switch_count, mismatch_count, comparisons, block_num = single_fragment_error_rate(hapcut_blks, frag)
-                print("{}\t{}\t{}\t{}\t{}".format(frag_name, switch_count, mismatch_count,comparisons, block_num),file=outfile)
-
-# parse args and execute main function
-if __name__ == '__main__':
-    args = parse_args()
-    fragment_error_rate(args.frag_file, args.hapcut_block_file, args.output_file)
+            # compute error rate and print
+            switch_count, mismatch_count, comparisons, block_num = single_fragment_error_rate(hapcut_blks, frag)
+            print("{}\t{}\t{}\t{}\t{}".format(frag.id, switch_count, mismatch_count,comparisons, block_num),file=outfile)
