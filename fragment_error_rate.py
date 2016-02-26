@@ -117,4 +117,6 @@ def fragment_error_rate(frag_list, hapblock_list, output_file):
 
             # compute error rate and print
             switch_count, mismatch_count, comparisons, block_num = single_fragment_error_rate(hapblock_list, frag)
-            print("{}\t{}\t{}\t{}\t{}".format(frag.id, switch_count, mismatch_count,comparisons, block_num),file=outfile)
+
+            if block_num > 0 and comparisons > 0:
+                print("{}\t{}\t{}\t{}\t{}".format(frag.id, switch_count, mismatch_count,comparisons, block_num),file=outfile)
