@@ -37,9 +37,9 @@ def create_sissor_fragments(sissor_vcf_file, bed_file, hapblock_list, pileup_fil
 
                 # read line elements
                 el    = line.strip().split()
-                if len(el) < 2:
-                    continue # empty line e.g. last line in file
-                elif len(el) < 8:
+                if len(el) < 2: # empty line e.g. last line in file
+                    continue
+                elif len(el) < 8: # malformed line that has too few columns
                     print("Pileup file line {} is malformed (too short):".format(i+1), file=sys.stderr)
                     print(line.strip())
                     continue
