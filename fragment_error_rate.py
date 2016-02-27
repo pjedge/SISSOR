@@ -25,7 +25,7 @@ def single_fragment_error_rate(hapcut_blks, frag):
     # figure out how many blocks are visited
     visited_blocks = set()
     for ix, pos, allele in frag.seq:
-        if (chrom,ix) not in ix_dict:
+        if (frag.chrom,ix) not in ix_dict:
             continue
         i,j = ix_dict[(chrom,ix)]
         if hapcut_blks[i][j][3] in ['0','1']:
