@@ -33,10 +33,17 @@ def create_sissor_fragments(sissor_vcf_file, bed_file, hapblock_list, pileup_fil
     if pileup_file != None:
         with open(pileup_file, 'r') as infile:
 
-            for line in infile:
+            for i, line in enumerate(infile):
 
                 # read line elements
                 el    = line.strip().split()
+                if len(el) < 2:
+                    continue # empty line e.g. last line in file
+                elif len(el) < 8:
+                    print("Pileup file line {} is malformed (too short):".format(i+1), file=sys.stderr)
+                    print(line.strip())
+                    continue
+
                 chrom = el[0]
                 pos   = int(el[1])-1
                 qual  = int(el[4])
