@@ -4,6 +4,8 @@
 # Author : Peter Edge
 # Email  : pedge@eng.ucsd.edu
 
+import sys
+
 class fragment:
 
     def __init__(self):
