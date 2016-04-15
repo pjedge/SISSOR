@@ -5,7 +5,6 @@
 # Email  : pedge@eng.ucsd.edu
 import argparse
 import sys
-#import math
 
 desc = '''converts SISSOR haploid vcf files to hapcut fragment matrices'''
 
@@ -70,7 +69,6 @@ def create_hapcut_fragment_matrix(sissor_vcf_file, bed_file, variant_vcf_file, p
                 pos   = int(el[1])-1
                 qual  = float(el[4])
                 depth = int(el[7])
-
                 Q = 10**(qual*-0.1)
 
                 # filter on quality and depth
