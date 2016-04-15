@@ -1,0 +1,13 @@
+__default__:
+    email:           pedge@eng.ucsd.edu
+    working_dir:     /home/pedge/git/SISSOR
+    queue:           hotel
+    group:           bansal-group
+    qsub_stdout_dir: /oasis/tscc/scratch/pedge/sissor/stdout
+    job_name:        snakemake_job
+    ppn:             1
+    walltime:        '10:00:00'
+
+sample_jobs:
+    ppn:      2
+    walltime: '10:00:00'

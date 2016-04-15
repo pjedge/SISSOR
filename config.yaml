@@ -1,0 +1,18 @@
+haptools_dir:          /home/pedge/git/HapTools
+data_dir:              /oasis/tscc/scratch/pedge/sissor
+qsub_stdout_dir:       /oasis/tscc/scratch/pedge/sissor/stdout
+PGP_21_vcfs_old:       /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/vcf
+PGP_21_pileups_old:    /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/pileup
+PGP_21_boundaries_old: /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/fragmentboundarybed
+PGP_22_old:            /oasis/tscc/scratch/wkchu/SISSOR/PGP1_22_highoutput
+BAC_hapblocks:         /oasis/tscc/scratch/wkchu/HaplotypeBAC
+variant_vcf_dir:       /oasis/tscc/scratch/pedge/sissor/PGP1_VCFs
+
+cell_ids:
+    - PGP1_21
+    - PGP1_22
+
+input_filetypes:
+    - vcf
+    - pileup
+    - bed
