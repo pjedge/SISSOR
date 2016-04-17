@@ -1,6 +1,10 @@
 haptools_dir:          /home/pedge/git/HapTools
-data_dir:              /oasis/tscc/scratch/pedge/sissor
-qsub_stdout_dir:       /oasis/tscc/scratch/pedge/sissor/stdout
+hapcut2:               /home/pedge/git/hapcut2/build/HAPCUT2
+data_dir:              /oasis/tscc/scratch/pedge/sissor_project/data
+experiments_dir:       /oasis/tscc/scratch/pedge/sissor_project/experiments
+error_rates_dir:       /oasis/tscc/scratch/pedge/sissor_project/error_rates
+plots_dir:             /oasis/tscc/scratch/pedge/sissor_project/plots
+qsub_stdout_dir:       /oasis/tscc/scratch/pedge/sissor_project/stdout
 PGP_21_vcfs_old:       /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/vcf
 PGP_21_pileups_old:    /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/pileup
 PGP_21_boundaries_old: /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/fragmentboundarybed
