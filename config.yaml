@@ -1,16 +1,19 @@
-haptools_dir:          /home/pedge/git/HapTools
-hapcut2:               /home/pedge/git/hapcut2/build/HAPCUT2
-data_dir:              /oasis/tscc/scratch/pedge/sissor_project/data
-experiments_dir:       /oasis/tscc/scratch/pedge/sissor_project/experiments
-error_rates_dir:       /oasis/tscc/scratch/pedge/sissor_project/error_rates
-plots_dir:             /oasis/tscc/scratch/pedge/sissor_project/plots
-qsub_stdout_dir:       /oasis/tscc/scratch/pedge/sissor_project/stdout
-PGP_21_vcfs_old:       /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/vcf
-PGP_21_pileups_old:    /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/pileup
-PGP_21_boundaries_old: /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/fragmentboundarybed
-PGP_22_old:            /oasis/tscc/scratch/wkchu/SISSOR/PGP1_22_highoutput
-BAC_hapblocks:         /oasis/tscc/scratch/wkchu/HaplotypeBAC
-variant_vcf_dir:       /oasis/tscc/scratch/pedge/sissor/PGP1_VCFs
+haptools_dir:           /home/pedge/git/HapTools
+hapcut2:                /home/pedge/git/hapcut2/build/HAPCUT2
+data_dir:               sissor_project/data
+experiments_dir:        sissor_project/experiments
+error_rates_dir:        sissor_project/error_rates
+plots_dir:              sissor_project/plots
+qsub_stdout_dir:        sissor_project/stdout
+PGP1_21_vcfs_old:       /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/vcf
+PGP1_21_pileups_old:    /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/pileup
+PGP1_21_boundaries_old: /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/fragmentboundarybed
+PGP1_22_old:            /oasis/tscc/scratch/wkchu/SISSOR/PGP1_22_highoutput
+BAC_hapblocks:          /oasis/tscc/scratch/pedge/data/BAC
+PGP1_21_freebayes:      /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/freebayes/freebayesrawcalls
+PGP1_22_freebayes:      /oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/previous/freebayesrawcalls
+PGP1_21_vcfs_new:       /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/freebayes/freebayesrawcalls
+PGP1_22_vcfs_new:       /oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/previous/freebayesrawcalls
 
 cell_ids:
     - PGP1_21
