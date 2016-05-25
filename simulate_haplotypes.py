@@ -194,7 +194,8 @@ def print_fragment(frag, ff):
     print(line1, file=ff)
     
 def main():
-    simulate_haplotypes('sim_fragments','sim_variants.vcf','sim_truth.txt')
+    os.system("mkdir -p sim_data")
+    simulate_haplotypes('sim_data/sim_fragments','sim_data/sim_variants.vcf','sim_data/sim_truth.txt')
 
 if __name__ == '__main__':
     main()
