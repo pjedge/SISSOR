@@ -14,7 +14,7 @@ import os
 import random
 
 # the core function of the simulation program
-def simulate_haplotypes(frag_file, vcf_file, truth_file, read_length=100000, coverage=3, ref_length=10000000, miscall_rate=0.02, missing_rate=0.01, per_frag_sw_err=0.03, snp_rate=0.0008):
+def simulate_haplotypes(frag_file, vcf_file, truth_file, read_length=100000, coverage=3, ref_length=10000000, miscall_rate=0.001, missing_rate=0.01, per_frag_sw_err=0.03, snp_rate=0.0008):
 
     # calculate number of reads based on coverage
     # account for the fact that we'll have missing calls from missing and miscall rate
@@ -39,7 +39,7 @@ def simulate_haplotypes(frag_file, vcf_file, truth_file, read_length=100000, cov
         for i in range(0,num_snps):
             print("{}\t{}\t{}\t{}\t{}".format(i+1,int(hap1[i]),int(hap2[i]),'sim_chrom',int(snp_ix[i])),file=hf)
 
-    with open(frag_file, 'w') as ff:
+    with open('{}.unsorted'.format(frag_file), 'w') as ff:
 
         # loop and generate fragments
         for i in range(0, num_reads):
@@ -91,7 +91,7 @@ def simulate_haplotypes(frag_file, vcf_file, truth_file, read_length=100000, cov
             # if base is miscalled to non-ref and non-alternate, convert to '-' (thrown away)
             miscall_vec = np.less(np.random.random_sample(len(frag.seq)), miscall_rate)
             miscall_indices = np.where(miscall_vec)[0]
-
+            extra_missing = 0
             for miscall in miscall_indices:
                 # miscalled to ref or variant
                 if random.randrange(0,3) == 0: # 1 in 3 chance of switching to the other base that is a ref or variant
@@ -101,18 +101,21 @@ def simulate_haplotypes(frag_file, vcf_file, truth_file, read_length=100000, cov
                         frag.seq[miscall] = '1'
                 else: # base position is thrown away, because it was miscalled to non-ref, non-alternate
                     frag.seq[miscall] = '-'
+                    extra_missing +=1
 
             # get the ascii quality score specified by miscall rate
             q = '~' if miscall_rate < 5.011872336272714e-10 else chr(int(33-10*math.log10(miscall_rate)))
             # extend it into an array
-            frag.qual = [q]*(len(frag.seq) - len(missing_indices))
+            frag.qual = [q]*(len(frag.seq) - len(missing_indices) - extra_missing)
 
             # don't print an empty fragment
             if '1' not in frag.seq and '0' not in frag.seq:
                 continue
-
+            
             print_fragment(frag, ff)
 
+    os.system('sort -n -k 3 {0}.unsorted > {0}; rm {0}.unsorted'.format(frag_file))
+    
     with open (vcf_file, 'w') as vcf:
         header ='''##fileformat=VCFv4.1
 ##contig=<ID=sim_genome,length={}>
