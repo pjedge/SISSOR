@@ -38,11 +38,9 @@ new_runs = ['PGP1_21_new','PGP1_22_new']
 rule all:
     input:
         expand("{P}/sissor_hapcut2.png",P=config['plots_dir']),
-        # "new" runs
-        #expand("{E}/hapcut2_{s}/{c}.output",E=experiments_dir,s=new_runs,c=chroms),
-        #expand("{E}/hapcut2_{s}/{c}.runtime",E=experiments_dir,s=new_runs,c=chroms),
-        #expand("{E}/hapcut2_chr4_test/chr4.output",E=experiments_dir,s=new_runs),
-        #expand("{E}/hapcut2_chr4_test/chr4.runtime",E=experiments_dir,s=new_runs),
+        # "new" snipped out runs
+        #hapblocks = expand("{E}/hapcut2_{s}/{c}.output",E=experiments_dir,s=runs,c=chroms),
+        #runtime = expand("{E}/hapcut2_{s}/{c}.runtime",E=experiments_dir,s=runs,c=chroms)
 
 # PLOT RESULTS
 rule plot_hapcut2_results:
@@ -58,16 +56,15 @@ rule plot_hapcut2_results:
         labels = pickle.load(open(input.labels_file,"rb"))
         plot_data.plot_experiment_sissor(data,labels,[],output.plot)
 
-prune_labels = ['normal','rhh']
-prune_tuples = [(0.8,0,0),(0,1,0)]
-labels = ['likelihood pruning','discrete pruning']
+fix_status=['normal','fixed']
+fix_labels=['Normal','Fragment Split Pre-processing']
 rule calculate_error_rates:
     params:
         job_name = "hapcut2_error_rates"
     input:
-        hapblocks = expand("{E}/pruned_hapcut2_PGP1_21_22/{p}/{c}.output",E=experiments_dir,p=prune_labels,c=chroms),
-        runtimes  = expand("{E}/pruned_hapcut2_PGP1_21_22/{p}/{c}.runtime",E=experiments_dir,p=prune_labels,c=chroms),
-        fragmats  = expand("{d}/PGP1_21_22/fragmat/{c}",d=data_dir,s=samples,c=chroms),
+        hapblocks = expand("{E}/hapcut2_PGP1_21_22_{fx}/{p}/{c}.output",E=experiments_dir,fx=fix_status,p=prune_labels,c=chroms),
+        runtimes  = expand("{E}/hapcut2_PGP1_21_22_{fx}/{p}/{c}.runtime",E=experiments_dir,fx=fix_status,p=prune_labels,c=chroms),
+        fragmats  = expand("{d}/PGP1_21_22/fragmat_{fx}/{c}",d=data_dir,fx=fix_status,s=samples,c=chroms),
         var_vcfs  = expand("{v}/{c}.vcf", v=variant_vcf_dir,c=chroms),
         bac_haps  = expand("{bac}/{c}",bac=config['BAC_hapblocks'], c=chroms)
     output:
@@ -76,13 +73,14 @@ rule calculate_error_rates:
     run:
         # list of lists of error results,
         data   = [] # index of the list is a 'condition' each inner list has 23 error results (each chrom).
+        labels = fix_labels
 
-        for p in prune_labels: # sample
+        for fx in fix_status: # sample
             datalist = []
             for c in chroms: # chromosome
-                assembly_file = "{}/pruned_hapcut2_PGP1_21_22/{}/{}.output".format(config['experiments_dir'],p,c)
-                runtime_file  = "{}/pruned_hapcut2_PGP1_21_22/{}/{}.runtime".format(config['experiments_dir'],p,c)
-                frag_file     = "{}/PGP1_21_22/fragmat/{}".format(data_dir,c)
+                assembly_file = "{}/hapcut2_PGP1_21_22_{}/{}/{}.output".format(config['experiments_dir'],fx,p,c)
+                runtime_file  = "{}/hapcut2_PGP1_21_22_{}/{}/{}.runtime".format(config['experiments_dir'],fx,p,c)
+                frag_file     = "{}/PGP1_21_22/fragmat_{}/{}".format(data_dir,fx,c)
                 vcf_file      = "{}/{}.vcf".format(variant_vcf_dir,c)
                 truth_file    = "{}/{}".format(config['BAC_hapblocks'], c)
                 err = error_rates.hapblock_hapblock_error_rate(truth_file, assembly_file, frag_file, vcf_file, runtime_file)
@@ -91,11 +89,11 @@ rule calculate_error_rates:
             print("{} results over all chromosomes:".format(p))
             print(sum(datalist,error_rates.error_result(None, 0, 0, 0, 0, 0, 0, 0, None,[],[],[])))
 
-            data.append(datalist)
+        data.append(datalist)
 
         pickle.dump(data,open(output.stats_file,"wb"))
         pickle.dump(labels,open(output.labels_file,"wb"))
-
+'''
 # PRUNE HAPCUT2 RESULTS
 rule prune_hapcut2:
     params:
@@ -117,32 +115,43 @@ rule prune_hapcut2:
                 input_hap = "{}/hapcut2_PGP1_21_22/{}.output".format(config['experiments_dir'],c)
                 output_hap = "{}/pruned_hapcut2_PGP1_21_22/{}/{}.output".format(config['experiments_dir'],pl,c)
                 fileIO.prune_hapblock_file(input_hap, output_hap, sq, sb, rh)
-
+'''
 # RUN HAPCUT2
 rule run_hapcut2:
     params:
         job_name = "{s}.{c}_hapcut",
     input:
-        frag_file = "%s/{s}/fragmat/{c}" % data_dir,
+        frag_file = "%s/{s}/fragmat/{fx}/{c}" % data_dir,
         vcf_file  = lambda wildcards: expand("{v}/{c}.vcf", v=variant_vcf_dir,c=wildcards.c)
     output:
-        hapblocks = "{E}/hapcut2_{s}/{c}.output",
-        runtime = "{E}/hapcut2_{s}/{c}.runtime"
+        hapblocks = "{E}/hapcut2_{s}_{fx}/{c}.output",
+        runtime = "{E}/hapcut2_{s}_{fx}/{c}.runtime"
     run:
         # run hapcut
-        runtime = run_tools.run_hapcut2(config['hapcut2'], input.frag_file, input.vcf_file, output.hapblocks, 1000, 25, 1, 0, 1, 0.8, '--ea 1')
+        runtime = run_tools.run_hapcut2(config['hapcut2'], input.frag_file, input.vcf_file, output.hapblocks, 1000, 100, 1, 0, 5, 0.8)
         with open(output.runtime,'w') as rf:
             print(runtime, file=rf)
+
+# CREATE FRAGMENT MATRIX FILES FOR EXPERIMENT
+rule fix_fragmat:
+    params:
+        job_name  = "{s}_fix_fragmat",
+    input:
+        samples = expand("{{data_dir}}/{{s}}/fragmat/normal/{c}",c=chroms)
+    output:
+        fixed = expand("{{data_dir}}/{{s}}/fragmat/fixed/{c}",c=chroms)
+    run:
+        for i, o in zip(input.samples, output.fixed):
 
 # COMBINE FRAGMENT MATRICES
 rule merge_fragmat:
     params:
         job_name  = "merge_fragmat",
     input:
-        P21 = expand("{{data_dir}}/PGP1_21/fragmat/{c}",c=chroms),
-        P22 = expand("{{data_dir}}/PGP1_22/fragmat/{c}",c=chroms)
+        P21 = expand("{{data_dir}}/PGP1_21/fragmat/normal/{c}",c=chroms),
+        P22 = expand("{{data_dir}}/PGP1_22/fragmat/normal/{c}",c=chroms)
     output:
-        P21_22 = expand("{{data_dir}}/PGP1_21_22/fragmat/{c}",c=chroms)
+        P21_22 = expand("{{data_dir}}/PGP1_21_22/fragmat/normal/{c}",c=chroms)
     run:
         for i1, i2, o in zip(input.P21, input.P22, output.P21_22):
             shell('cat {i1} {i2} > {o}')
@@ -156,7 +165,7 @@ rule create_fragmat:
         beds     = expand("{{data_dir}}/{{s}}/beds/ch{ch}.bed",ch=chambers),
         var_vcfs = expand("{{data_dir}}/PGP1_VCFs/{CHR}.vcf",CHR=chroms)
     output:
-        expand("{{data_dir}}/{{s}}/fragmat/{c}",c=chroms)
+        expand("{{data_dir}}/{{s}}/fragmat/normal/{c}",c=chroms)
     run:
         output_dir = os.path.join(data_dir,wildcards.s,'fragmat')
         create_hapcut_fragment_matrices_freebayes(input.vcfs, input.beds, input.var_vcfs, output_dir)
