@@ -34,13 +34,15 @@ chambers_pad = ['{0:02d}'.format(c) for c in chambers]
 chroms  = ['chr{}'.format(i) for i in range(1,23)]
 samples = ['PGP1_21_22','PGP1_21','PGP1_22']
 
-runs = ['PGP1_21_new','PGP1_22_new']
+new_runs = ['PGP1_21_new','PGP1_22_new']
 rule all:
     input:
         expand("{P}/sissor_hapcut2.png",P=config['plots_dir']),
-        # "new" snipped out runs
-        hapblocks = expand("{E}/hapcut2_{s}/{c}.output",E=experiments_dir,s=runs,c=chroms),
-        runtime = expand("{E}/hapcut2_{s}/{c}.runtime",E=experiments_dir,s=runs,c=chroms)
+        # "new" runs
+        #expand("{E}/hapcut2_{s}/{c}.output",E=experiments_dir,s=new_runs,c=chroms),
+        #expand("{E}/hapcut2_{s}/{c}.runtime",E=experiments_dir,s=new_runs,c=chroms),
+        #expand("{E}/hapcut2_chr4_test/chr4.output",E=experiments_dir,s=new_runs),
+        #expand("{E}/hapcut2_chr4_test/chr4.runtime",E=experiments_dir,s=new_runs),
 
 # PLOT RESULTS
 rule plot_hapcut2_results:
@@ -160,89 +162,46 @@ rule create_fragmat:
         create_hapcut_fragment_matrices_freebayes(input.vcfs, input.beds, input.var_vcfs, output_dir)
 
 # simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
-rule simlink_PGP1_21_freebayes:
-    input:
-        vcf = expand("{DIR}/PGP1_21_ch{chpad}.freebayes.remap.depth.vcf",DIR=config['PGP1_21_freebayes'],chpad=chambers_pad),
-    run:
-        for ch,chpad in zip(chambers,chambers_pad):
-            shell('''
-            mkdir -p {data_dir}/PGP1_21/freebayes
-            ln -s {config[PGP1_21_freebayes]}/PGP1_21_ch{chpad}.freebayes.remap.depth.vcf {data_dir}/PGP1_21/freebayes/ch{ch}.vcf''')
-
-# simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
-rule simlink_PGP1_22_freebayes:
-    input:
-        vcf = expand("{DIR}/PGP1_22_ch{chpad}.freebayes.remap.depth.vcf",DIR=config['PGP1_22_freebayes'],chpad=chambers_pad),
-    run:
-        for ch,chpad in zip(chambers,chambers_pad):
-            shell('''
-            mkdir -p {data_dir}/PGP1_22/freebayes
-            ln -s {config[PGP1_22_freebayes]}/PGP1_22_ch{chpad}.freebayes.remap.depth.vcf {data_dir}/PGP1_22/freebayes/ch{ch}.vcf''')
-
-# simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
 rule simlink_PGP1_21:
     input:
-        vcf    = expand("{DIR}/PGP1_21_ch{chpad}.sorted.fragment.depth5.vcf",DIR=config['PGP1_21_vcfs_old'],chpad=chambers_pad),
-        pileup = expand("{DIR}/PGP1_21_ch{chpad}.sorted.fragment.depth.pileup",DIR=config['PGP1_21_pileups_old'],chpad=chambers_pad),
+        vcf = expand("{DIR}/PGP1_21_ch{chpad}.freebayes.remap.depth.new.vcf",DIR=config['PGP1_21_freebayes'],chpad=chambers_pad),
         bed    = expand("{DIR}/PGP1_21_FragmentBoundaryCh{ch}.bed",DIR=config['PGP1_21_boundaries_old'],ch=chambers),
     run:
         for ch,chpad in zip(chambers,chambers_pad):
             shell('''
-            mkdir -p {data_dir}/PGP1_21/VCFs
-            mkdir -p {data_dir}/PGP1_21/pileups
+            mkdir -p {data_dir}/PGP1_21/freebayes
             mkdir -p {data_dir}/PGP1_21/beds
-            ln -s {config[PGP1_21_vcfs_old]}/PGP1_21_ch{chpad}.sorted.fragment.depth5.vcf {data_dir}/PGP1_21/VCFs/ch{ch}.vcf
-            ln -s {config[PGP1_21_pileups_old]}/PGP1_21_ch{chpad}.sorted.fragment.depth.pileup {data_dir}/PGP1_21/pileups/ch{ch}.pileup
+            ln -s {config[PGP1_21_freebayes]}/PGP1_21_ch{chpad}.freebayes.remap.depth.new.vcf {data_dir}/PGP1_21/freebayes/ch{ch}.vcf
             ln -s {config[PGP1_21_boundaries_old]}/PGP1_21_FragmentBoundaryCh{ch}.bed {data_dir}/PGP1_21/beds/ch{ch}.bed''')
 
 # simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
 rule simlink_PGP1_22:
     input:
-        vcf    = expand("{DIR}/PGP1_22_ch{chpad}.sorted.fragment.vcf",DIR=config['PGP1_22_old'],chpad=chambers_pad),
-        pileup = expand("{DIR}/PGP1_22_ch{chpad}.sorted.fragment.depth.pileup",DIR=config['PGP1_22_old'],chpad=chambers_pad),
+        vcf = expand("{DIR}/PGP1_22_ch{chpad}.freebayes.remap.depth.vcf",DIR=config['PGP1_22_freebayes'],chpad=chambers_pad),
         bed    = expand("{DIR}/PGP1_22_FragmentBoundaryCh{ch}.bed",DIR=config['PGP1_22_old'],ch=chambers),
     run:
         for ch,chpad in zip(chambers,chambers_pad):
             shell('''
-            mkdir -p {data_dir}/PGP1_22/VCFs
-            mkdir -p {data_dir}/PGP1_22/pileups
+            mkdir -p {data_dir}/PGP1_22/freebayes
             mkdir -p {data_dir}/PGP1_22/beds
-            ln -s {config[PGP1_22_old]}/PGP1_22_ch{chpad}.sorted.fragment.vcf {data_dir}/PGP1_22/VCFs/ch{ch}.vcf
-            ln -s {config[PGP1_22_old]}/PGP1_22_ch{chpad}.sorted.fragment.depth.pileup {data_dir}/PGP1_22/pileups/ch{ch}.pileup
+            ln -s {config[PGP1_22_freebayes]}/PGP1_22_ch{chpad}.freebayes.remap.depth.new.vcf {data_dir}/PGP1_22/freebayes/ch{ch}.vcf
             ln -s {config[PGP1_22_old]}/PGP1_22_FragmentBoundaryCh{ch}.bed {data_dir}/PGP1_22/beds/ch{ch}.bed''')
 
-# NEW MINI-RUNS
+# MINI-RUN (CHR4)
 # simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
-rule simlink_PGP1_21_new:
-    input:
-        vcf    = expand("{DIR}/PGP1_21_ch{chpad}.freebayes.remap.depth.new.vcf",DIR=config['PGP1_21_vcfs_new'],chpad=chambers_pad),
-        pileup = expand("{DIR}/PGP1_21_ch{chpad}.sorted.fragment.depth.pileup",DIR=config['PGP1_21_pileups_old'],chpad=chambers_pad),
-        bed    = expand("{DIR}/PGP1_21_FragmentBoundaryCh{ch}.bed",DIR=config['PGP1_21_boundaries_old'],ch=chambers),
+rule simlink_chr4_test:
     run:
-        for ch,chpad in zip(chambers,chambers_pad):
-            shell('''
-            mkdir -p {data_dir}/PGP1_21_new/freebayes
-            mkdir -p {data_dir}/PGP1_21_new/pileups
-            mkdir -p {data_dir}/PGP1_21_new/beds
-            ln -s {config[PGP1_21_vcfs_new]}/PGP1_21_ch{chpad}.freebayes.remap.depth.new.vcf {data_dir}/PGP1_21_new/freebayes/ch{ch}.vcf
-            ln -s {config[PGP1_21_pileups_old]}/PGP1_21_ch{chpad}.sorted.fragment.depth.pileup {data_dir}/PGP1_21_new/pileups/ch{ch}.pileup
-            ln -s {config[PGP1_21_boundaries_old]}/PGP1_21_FragmentBoundaryCh{ch}.bed {data_dir}/PGP1_21_new/beds/ch{ch}.bed''')
+        shell('''
+        mkdir -p {data_dir}/chr4_test/freebayes
+        mkdir -p {data_dir}/chr4_test/beds''')
 
-# simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
-rule simlink_PGP1_22_new:
-    input:
-        vcf    = expand("{DIR}/PGP1_22_ch{chpad}.freebayes.remap.depth.new.vcf",DIR=config['PGP1_22_vcfs_new'],chpad=chambers_pad),
-        pileup = expand("{DIR}/PGP1_22_ch{chpad}.sorted.fragment.depth.pileup",DIR=config['PGP1_22_old'],chpad=chambers_pad),
-        bed    = expand("{DIR}/PGP1_22_FragmentBoundaryCh{ch}.bed",DIR=config['PGP1_22_old'],ch=chambers),
-    run:
         for ch,chpad in zip(chambers,chambers_pad):
-            shell('''
-            mkdir -p {data_dir}/PGP1_22_new/freebayes
-            mkdir -p {data_dir}/PGP1_22_new/pileups
-            mkdir -p {data_dir}/PGP1_22_new/beds
-            ln -s {config[PGP1_22_vcfs_new]}/PGP1_22_ch{chpad}.freebayes.remap.depth.new.vcf {data_dir}/PGP1_22_new/freebayes/ch{ch}.vcf
-            ln -s {config[PGP1_22_old]}/PGP1_22_ch{chpad}.sorted.fragment.depth.pileup {data_dir}/PGP1_22_new/pileups/ch{ch}.pileup
-            ln -s {config[PGP1_22_old]}/PGP1_22_FragmentBoundaryCh{ch}.bed {data_dir}/PGP1_22_new/beds/ch{ch}.bed''')
+            shell('ln -s {config[PGP1_22_vcfs_new]}/PGP1_22_ch{chpad}.freebayes.remap.depth.new.vcf {data_dir}/chr4_test/freebayes/ch{ch}.vcf')
+
+            if ch in [11,14,15,16,18,19,24]:
+                shell('ln -s /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/fragmentboundarybed/chr4/PGP1_21_FragmentBoundaryCh{ch}.chr4.bed {data_dir}/chr4_test/beds/ch{ch}.bed')
+            else:
+                shell('touch {data_dir}/chr4_test/beds/ch{ch}.bed')
 
 rule dummy:
     run:
