@@ -30,10 +30,10 @@ def parse_args():
     return args
 
 def overlap(f1, f2):
-    
+
     assert(f1[0][0] <= f2[0][0])
 
-    return not (f2[0][0] > f1[-1][0]) 
+    return not (f2[0][0] > f1[-1][0])
 
 # next function that returns 0 instead of raising StopIteration
 # this is convenient for iterating over file 2 at a time
@@ -42,17 +42,17 @@ def safenext(iterator):
         nextval = next(iterator)
         return nextval
     except StopIteration:
-        return 0   
-    
+        return 0
+
 # determine if two fragments are consistent with each other
 def consistent(f1, f2, i,j, contam_bounds, t):
-    
+
     answer = True
-    assert(f1[0][0] <= f2[0][0])    
-    
-    
+    assert(f1[0][0] <= f2[0][0])
+
+
     f2iter = iter(f2) # iterator for fragment2
-    a2 = safenext(f2iter)    
+    a2 = safenext(f2iter)
     if not a2:
         return answer, contam_bounds
 
@@ -63,23 +63,23 @@ def consistent(f1, f2, i,j, contam_bounds, t):
     possible_switch_pos = None
 
     for a1 in f1:
-        
+
         if done:
             break
-        
+
         while a1[0] > a2[0]:
             a2 = safenext(f2iter)
             if not a2:
                 done = True
                 break
-        
+
         if a1[0] < a2[0] or done:
             continue
         assert a1[0] == a2[0]
         if first_pos:
             switched = (a1[1] != a2[1])
             first_pos = False
-            
+
         if (a1[1] == a2[1] and not switched) or (a1[1] != a2[1] and switched):
             mismatches = 0
             possible_switch_pos = None
@@ -97,12 +97,12 @@ def consistent(f1, f2, i,j, contam_bounds, t):
         a2 = safenext(f2iter)
         if not a2:
             break
-    
+
     contam_bounds[(j,i)] = contam_bounds[(i,j)]
 
     return answer, contam_bounds
-        
-        
+
+
 def read_fragment_matrix(frag_matrix):
 
     names = []
@@ -133,46 +133,50 @@ def read_fragment_matrix(frag_matrix):
             #qlist = [10**((ord(q) - 33) * -0.1) for q in qlist]
 
             alist= [(a,b,c) for ((a,b),c) in zip(call_list2,qlist)]
-            
+
             flist.append(alist)
             names.append(name)
-    
-    return flist, names
-        
+
+    zipped = zip(names,flist)
+    sorted_zipped = sorted(zipped,key=lambda x: x[1][0][0])
+    sorted_flist, sorted_names = [list(z) for z in zip(*sorted_zipped)]
+
+    return sorted_flist, sorted_names
+
 def matrixify_flist(flist,names, outfile):
 
     max_ix = 0
-    
+
     for f in flist:
-        
+
         for a in f:
-            
+
             if a[0] > max_ix:
-                
+
                 max_ix = a[0]
-                
+
     max_name = 0
-    
+
     for name in names:
         if len(name) > max_name:
             max_name = len(name)
 
     with open(outfile,'w') as o:
         for f,name in zip(flist,names):
-            
+
             line = [name.ljust(max_name+1)]+['-'] * max_ix
             for a in f:
                 line[a[0]] = a[1]
-                
+
             pline = ''.join(line)
-            
+
             print(pline,file=o)
-            
-            
+
+
 def fix_chamber_contamination(fragments,outfile, threshold=4):
-    
+
     contam_bounds = defaultdict(set)
-    
+
     # read fragments into fragment data structure
     flist, names = read_fragment_matrix(fragments)
 
@@ -184,33 +188,33 @@ def fix_chamber_contamination(fragments,outfile, threshold=4):
 
     if DEBUG:
         cov_counts = defaultdict(int)
-        
+
         for f in flist:
-            
+
             for a in f:
-                
+
                 cov_counts[a[0]] += 1
-    
-    #for k in sorted(list(cov_counts.keys())):    
+
+    #for k in sorted(list(cov_counts.keys())):
     #    print("{}\t{}".format(k,cov_counts[k]))
-    
+
     # create a graph representing consistency of reads
     #  0: reads do not overlap
     # -1: reads are inconsistent
     #  1: reads are consistent
     C = np.zeros((N,N),dtype='int')
-    
+
     for i in range(N):
         for j in range(i+1,N):
-            
+
             f1 = flist[i]
             f2 = flist[j]
 
             if not overlap(f1,f2):
                 continue
-            
+
             cons,contam_bounds = consistent(f1,f2,i,j,contam_bounds, threshold)
-            
+
             if cons:
                 C[i,j] = 1
                 C[j,i] = 1
@@ -222,28 +226,28 @@ def fix_chamber_contamination(fragments,outfile, threshold=4):
     break_list = [set() for x in range(N)]
 
     bad = np.sum((C == -1),1) # find how many inconsistents each fragment has
-        
+
     for i in range(N):
 
         if bad[i] == 0:
             continue
-        
+
         f1 = flist[i]
         name = names[i]
 
         # consider repairing f1.
         # if f1 is inconsistent with multiple reads then we just split f1 where inconsistent.
         # if f1 is inconsistent with one read, then we split both reads at the inconsistent location.
-        
-        
+
+
         blist = []
         for j in range(N):
             if C[i,j] != -1:
                 continue
             blist.append(j)
-           
+
         for b1, b2 in itertools.combinations(blist,2):
-            
+
             common_error = set.intersection(contam_bounds[(i,b1)],contam_bounds[(i,b2)])
             if common_error != set():
                 break_list[i] = break_list[i].union(common_error)
@@ -251,27 +255,27 @@ def fix_chamber_contamination(fragments,outfile, threshold=4):
                 for bx in blist:
                     bad[bx] -= len(common_error)
                     contam_bounds[(i,bx)] -= common_error
-                                  
+
                 if bad[i] == 0:
-                    break                       
-                
+                    break
+
     new_flist = []
     new_names = []
 
     for i in range(N):
-        
+
         f1 = flist[i]
         name = names[i]
-        
+
         # consider repairing f1.
         if bad[i] > 0:
             for j in range(N):
-    
+
                 if C[i,j] != -1:
                     continue
                 if contam_bounds[(i,j)] != set(): # inconsistencies weren't previously fixed
                     break_list[i] = contam_bounds[(i,j)]
-                          
+
         if break_list[i] == set():
             # add unedited fragment to new fragment list
             new_flist.append(f1)
@@ -291,23 +295,23 @@ def fix_chamber_contamination(fragments,outfile, threshold=4):
                         new_flist.append(new_f)
                         new_names.append("{}:PART{}".format(name,name_ctr))
                         name_ctr += 1
-                        
+
                     new_f = []
-                
+
                 new_f.append(allele)
-                
+
             if len(new_f) > 1:
                 new_flist.append(new_f)
                 new_names.append("{}:PART{}".format(name,name_ctr))
 
     # WRITE TO FILE
-    
+
     lines = []
-                    
+
     for name, fs in zip(new_names, new_flist):
         if len(fs) < 2:
             continue
-        
+
         fragstr = ''
         num_pairs = 0
         prev_snp_ix = -2
@@ -330,19 +334,19 @@ def fix_chamber_contamination(fragments,outfile, threshold=4):
 
         prefix = '{} {}'.format(num_pairs,name)
         fragstr = prefix + fragstr
-        
+
         lines.append((name, fragstr))
 
     lines.sort()
-            
+
     with open(outfile, 'w') as opf:
         for firstpos, line in lines:
             print(line, file=opf)
-    
+
     if DEBUG:
         matrixify_flist(new_flist,new_names, 'sim_data/pretty_fragmatrix_fixed')
 
-            
+
 if __name__ == '__main__':
     args = parse_args()
     fix_chamber_contamination(args.fragments,args.output, args.threshold)
