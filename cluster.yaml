@@ -14,7 +14,7 @@ calculate_error_rates:
 
 run_hapcut2:
     ppn: 1
-    walltime: '20:00:00'
+    walltime: '40:00:00'
 
 merge_fragmat:
     ppn: 1
