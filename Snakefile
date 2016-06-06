@@ -87,10 +87,10 @@ rule calculate_error_rates:
                 err = error_rates.hapblock_hapblock_error_rate(truth_file, assembly_file, frag_file, vcf_file, runtime_file)
                 datalist.append(err)
 
-            print("{} results over all chromosomes:".format(p))
+            print("{} results over all chromosomes:".format(fx))
             print(sum(datalist,error_rates.error_result(None, 0, 0, 0, 0, 0, 0, 0, None,[],[],[])))
 
-        data.append(datalist)
+            data.append(datalist)
 
         pickle.dump(data,open(output.stats_file,"wb"))
         pickle.dump(labels,open(output.labels_file,"wb"))
@@ -107,7 +107,7 @@ rule run_hapcut2:
         runtime = "{E}/hapcut2_{s}/{fx}/{c}.runtime"
     run:
         # run hapcut
-        runtime = run_tools.run_hapcut2(config['hapcut2'], input.frag_file, input.vcf_file, output.hapblocks, 1000, 100, 1, 0, 5, 0.8)
+        runtime = run_tools.run_hapcut2(config['hapcut2'], input.frag_file, input.vcf_file, output.hapblocks, 1000, 100, 1, 0, 5, 0.8, '')
         with open(output.runtime,'w') as rf:
             print(runtime, file=rf)
 
