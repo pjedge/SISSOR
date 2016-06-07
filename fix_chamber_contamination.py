@@ -20,6 +20,8 @@ def parse_args():
     parser.add_argument('-f', '--fragments', nargs='?', type = str, help='fragment file to process')
     parser.add_argument('-o', '--output', nargs='?', type = str, help='output fragments')
     parser.add_argument('-t', '--threshold', nargs='?', type = float, help='number of consecutive mismatches with respect to another fragment that count as contamination', default = 4)
+    parser.add_argument('-c', '--filter_cov1', action='store_true', help='filter out positions with coverage 1', default = False)
+
 
     # default to help option. credit to unutbu: http://stackoverflow.com/questions/4042452/display-help-message-with-python-argparse-when-script-is-called-without-any-argu
     if len(sys.argv) < 3:
@@ -174,7 +176,7 @@ def matrixify_flist(flist,names, outfile):
             print(pline,file=o)
 
 
-def fix_chamber_contamination(fragments,outfile, threshold=4):
+def fix_chamber_contamination(fragments,outfile, threshold=4, filter_cov1=False):
 
     contam_bounds = defaultdict(set)
 
@@ -187,14 +189,41 @@ def fix_chamber_contamination(fragments,outfile, threshold=4):
     N = len(flist)
     assert(N == len(names))
 
-    if DEBUG:
-        cov_counts = defaultdict(int)
+    cov_counts = defaultdict(int)
 
-        for f in flist:
+    for f in flist:
 
+        for a in f:
+
+            cov_counts[a[0]] += 1
+
+    # filter out positions with coverage 1
+    if filter_cov1:
+        
+        filtered_flist = []
+        filtered_names = []        
+        
+        # for each fragment and name
+        for f,n in zip(flist,names):
+            
+            new_f = []
+            
             for a in f:
-
-                cov_counts[a[0]] += 1
+                
+                # if coverage greater than 1
+                if cov_counts[a[0]] > 1:
+                    
+                    new_f.append(a)
+                    
+            # if the fragment has at least 2 alleles after filtering add it to new list
+            if len(new_f) >= 2:
+                
+                filtered_flist.append(new_f)
+                filtered_names.append(n)
+                
+        # overwrite the old fragments and names
+        flist = filtered_flist
+        names = filtered_names
 
     #for k in sorted(list(cov_counts.keys())):
     #    print("{}\t{}".format(k,cov_counts[k]))
@@ -294,7 +323,7 @@ def fix_chamber_contamination(fragments,outfile, threshold=4):
                         print("Breaking {} at pos {}".format(name,allele[0]))
                     if len(new_f) > 1:
                         new_flist.append(new_f)
-                        new_names.append("{}:PART{}".format(name,name_ctr))
+                        new_names.append("{}:S{}".format(name,name_ctr))
                         name_ctr += 1
 
                     new_f = []
@@ -303,7 +332,7 @@ def fix_chamber_contamination(fragments,outfile, threshold=4):
 
             if len(new_f) > 1:
                 new_flist.append(new_f)
-                new_names.append("{}:PART{}".format(name,name_ctr))
+                new_names.append("{}:S{}".format(name,name_ctr))
 
     # WRITE TO FILE
 
@@ -350,4 +379,4 @@ def fix_chamber_contamination(fragments,outfile, threshold=4):
 
 if __name__ == '__main__':
     args = parse_args()
-    fix_chamber_contamination(args.fragments,args.output, args.threshold)
+    fix_chamber_contamination(args.fragments,args.output, args.threshold, args.filter_cov1)
