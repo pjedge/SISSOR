@@ -72,9 +72,10 @@ def consistent(f1, f2, i,j, contam_bounds, t):
             if not a2:
                 done = True
                 break
-
-        if a1[0] < a2[0] or done:
+        
+        if done or a1[0] < a2[0]:
             continue
+
         assert a1[0] == a2[0]
         if first_pos:
             switched = (a1[1] != a2[1])
@@ -139,7 +140,7 @@ def read_fragment_matrix(frag_matrix):
 
     zipped = zip(names,flist)
     sorted_zipped = sorted(zipped,key=lambda x: x[1][0][0])
-    sorted_flist, sorted_names = [list(z) for z in zip(*sorted_zipped)]
+    sorted_names, sorted_flist = [list(z) for z in zip(*sorted_zipped)]
 
     return sorted_flist, sorted_names
 
@@ -179,7 +180,7 @@ def fix_chamber_contamination(fragments,outfile, threshold=4):
 
     # read fragments into fragment data structure
     flist, names = read_fragment_matrix(fragments)
-
+    
     if DEBUG:
         matrixify_flist(flist,names, 'sim_data/pretty_fragmatrix')
 
@@ -335,7 +336,7 @@ def fix_chamber_contamination(fragments,outfile, threshold=4):
         prefix = '{} {}'.format(num_pairs,name)
         fragstr = prefix + fragstr
 
-        lines.append((name, fragstr))
+        lines.append((firstpos, fragstr))
 
     lines.sort()
 
