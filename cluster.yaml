@@ -14,15 +14,15 @@ calculate_error_rates:
 
 run_hapcut2:
     ppn: 1
-    walltime: '40:00:00'
+    walltime: '20:00:00'
 
-merge_fragmat:
-    ppn: 1
-    walltime: '00:30:00'
+merge_and_fix_fragmat:
+    ppn: 2
+    walltime: '4:00:00'
 
 create_fragmat:
     ppn: 2
-    walltime: '15:00:00'
+    walltime: '20:00:00'
 
 sample_jobs:
     ppn:      2

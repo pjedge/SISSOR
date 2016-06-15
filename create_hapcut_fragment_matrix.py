@@ -16,7 +16,7 @@ Designed for work on ONE chromosome across many chambers:
     - The output_fragment_file should specify the chromosome label.
 '''
 
-def create_hapcut_fragment_matrices_freebayes(sissor_vcf_files, bed_files, variant_vcf_files, output_dir):
+def create_hapcut_fragment_matrices_freebayes(haploid_files, bed_files, diploid_files, variant_vcf_files, output_dir):
 
     dp_pat = re.compile("DP=(\d+)")
     qr_pat = re.compile(";QR=(\d+)")
@@ -43,10 +43,10 @@ def create_hapcut_fragment_matrices_freebayes(sissor_vcf_files, bed_files, varia
     # step through triples of a haploid vcf file, the bedfile that defines
     # where fragment boundaries are, and the pileup file.
     # pileup file allows us to know which SNPs have acceptable depth/quality
-    for sissor_vcf_file, bed_file in zip(sissor_vcf_files, bed_files):
+    for haploid_file, diploid_file, bed_file in zip(haploid_files, diploid_files, bed_files):
 
         call_dict = dict()
-        with open(sissor_vcf_file, 'r') as infile:
+        with open(haploid_file, 'r') as infile:
 
             for line in infile:
                 if len(line) < 3 or line[0] == '#':
@@ -84,26 +84,75 @@ def create_hapcut_fragment_matrices_freebayes(sissor_vcf_files, bed_files, varia
                     continue
                 bed_data.append(line.strip().split()[:3])
 
+        # use diploid FreeBayes file to find positions reliably called as heterozygous and split on them
+        het_calls = set()
+        
+        if diploid_file != None:
+        
+            with open(diploid_file,'r') as infile:
+                for line in infile:
+                    if len(line) < 3 or line[0] == '#':
+                        continue
+                    
+                    # read line elements
+                    el    = line.strip().split()
+                    if len(el) < 3:
+                        continue
+                    chrom = el[0]
+                    pos   = int(el[1])-1
+                    fields1 = el[7]
+                    labels = el[8]
+                    assert(labels[:2] == 'GT')
+                    fields2 = el[9]
+                    genotype = fields2[0:3]
+        
+                    qual = int(float(el[5]))
+                    depth = int(float(re.findall(dp_pat,fields1)[0]))
+        
+                    if qual > 30 and depth >= 5 and genotype in ['0/1','1/0','1|0','0|1']:
+                        
+                        het_calls.add((chrom,pos))
+                
+
+
         # create a list where each element is a list corresponding to a bed region
         # each A contains tuples for each snp found in the hapcut haplotype that falls in the region
-        frag_snps = [[] for i in bed_data]
+        frag_snps = []
         names     = []
-
+        
         for i, (chrom, p1, p2) in enumerate(bed_data):
             p1 = int(p1)
             p2 = int(p2)
             curr_name = '{}:{}-{}'.format(chrom,p1,p2)
             names.append(curr_name)
+            frag = []
             # consume SNPs leading up to bed region
             # add SNPs inside current bed region to fs
+            
+            part_counter = 0
             for snp_pos in range(p1,p2+1):
+                
                 if (chrom, snp_pos) not in call_dict:
                     continue
 
                 call, Q, snp_ix = call_dict[(chrom, snp_pos)] # get the quality char from the genotype call
+                
+                if (chrom,snp_pos) in het_calls:
+                    frag_snps.append(frag)
+                    part_name = '{}:H{}'.format(curr_name,part_counter)
+                    part_counter += 1
+                    names.append(part_name)
+                    frag = []
+                else:
+                    frag.append((snp_ix, chrom, snp_pos, call, Q)) # mark this as a nonref allele
 
-                frag_snps[i].append((snp_ix, chrom, snp_pos, call, Q)) # mark this as a nonref allele
-
+            frag_snps.append(frag)
+            if part_counter == 0:
+                names.append(curr_name)
+            else:
+                part_name = '{}:H{}'.format(curr_name,part_counter)
+                names.append(part_name)
+                
         # now take this information and make it into a fragment matrix file line
         for name, fs in zip(names, frag_snps):
             if len(fs) < 2:
