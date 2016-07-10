@@ -6,12 +6,12 @@
 # configure paths and values in cluster.yaml and config.yaml to your system
 # example execution for a TORQUE cluster:
 # snakemake -j 200 --cluster-config cluster.yaml --cluster "qsub -A {cluster.group} -V -q {cluster.queue} -o {cluster.qsub_stdout_dir}/{params.job_name}.o -e {cluster.qsub_stdout_dir}/{params.job_name}.e -N {params.job_name} -l nodes=1:ppn={cluster.ppn} -l walltime={cluster.walltime} -M {cluster.email} -m e -d {cluster.working_dir}" --local-cores 1
-
+sys.path.append('/home/peter/git/HapTools')
 configfile: "config.yaml"
 localrules: all, plot_hapcut2_results, simlinks, clean
 
 import sys
-sys.path.append(config['haptools_dir'])
+#sys.path.append(config['haptools_dir'])
 import run_tools
 import error_rates
 import fileIO
