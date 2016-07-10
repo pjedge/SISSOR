@@ -5,12 +5,14 @@ Created on Thu May 19 21:44:48 2016
 @author: peter
 """
 
+import fragment
 import argparse
 import sys
 import numpy as np
 from collections import defaultdict
 import itertools
 
+VERBOSE = False
 DEBUG = False
 
 def parse_args():
@@ -31,40 +33,33 @@ def parse_args():
     args = parser.parse_args()
     return args
 
-def overlap(f1, f2):
+def overlap(f1, f2, amt=1):
 
-    assert(f1[0][0] <= f2[0][0])
+    assert(f1.seq[0][0] <= f2.seq[0][0])
 
-    return not (f2[0][0] > f1[-1][0])
+    s1 = set([a[0] for a in f1.seq])
+    s2 = set([a[0] for a in f2.seq])
+    inter = set.intersection(s1,s2)
 
-# next function that returns 0 instead of raising StopIteration
-# this is convenient for iterating over file 2 at a time
-def safenext(iterator):
-    try:
-        nextval = next(iterator)
-        return nextval
-    except StopIteration:
-        return 0
+    return len(inter) >= amt
 
-# determine if two fragments are consistent with each other
-def consistent(f1, f2, i,j, contam_bounds, t):
+    
+def total_SER(f1, f2):
 
-    answer = True
-    assert(f1[0][0] <= f2[0][0])
-
-
-    f2iter = iter(f2) # iterator for fragment2
+    assert(f1.seq[0][0] <= f2.seq[0][0])
+    
+    f2iter = iter(f2.seq) # iterator for fragment2
     a2 = safenext(f2iter)
     if not a2:
-        return answer, contam_bounds
+        return 0
 
-    mismatches = 0
+    switches = 0
+    total_pos = 0
     done  = False
     first_pos = True
     switched = False
-    possible_switch_pos = None
 
-    for a1 in f1:
+    for a1 in f1.seq:
 
         if done:
             break
@@ -80,159 +75,190 @@ def consistent(f1, f2, i,j, contam_bounds, t):
 
         assert a1[0] == a2[0]
         if first_pos:
-            switched = (a1[1] != a2[1])
+            switched = (a1[2] != a2[2])
+            first_pos = False
+        
+        total_pos += 1
+        if (a1[2] != a2[2] and not switched) or (a1[2] == a2[2] and switched):
+            switches += 1
+            switched = not switched
+
+        a2 = safenext(f2iter)
+        if not a2:
+            break
+
+    return switches, total_pos
+
+def get_het_breakpoints(frag,min_het_count=3,max_het_frac=0.25):
+    
+    breaks = []
+    
+    for i in range(len(frag.seq)):
+        if frag.seq[i][2] != '2':
+            continue
+            
+        hom_count = 0
+        het_count = 0
+        
+        for j in range(i,len(frag.seq)):
+            if frag.seq[j][2] == '2':
+                het_count += 1
+                
+                het_frac = het_count/(hom_count+het_count)
+
+                if het_count >= min_het_count and het_frac >= max_het_frac:
+                    breaks.append((i,j))
+                
+            else:
+                hom_count += 1
+                
+    breakpos = set()
+    for i,j in breaks:
+        for k in range(i,j+1):
+            breakpos.add(frag.seq[k][0])
+            
+    return breakpos
+    
+def split_fragment_hets(frag,min_het_count=3,max_het_frac=0.25):
+
+    breakpos = get_het_breakpoints(frag,min_het_count,max_het_frac)
+    
+    new_fragment_pieces = []
+    new_piece = []
+    split_occured = False
+    for pos, gpos, call, qual in frag.seq:
+        if pos in breakpos:
+            split_occured = True
+            if len(new_piece) >= 2:
+                new_fragment_pieces.append(new_piece)
+            new_piece = []
+        else:
+            if call != '2':
+                new_piece.append((pos,gpos,call,qual))
+
+    if len(new_piece) >= 2:
+        new_fragment_pieces.append(new_piece)
+    new_piece = []
+                
+    new_fragment_piece_objects = []
+    if split_occured:
+        for i, piece in enumerate(new_fragment_pieces):
+            new_name = '{}:H{}'.format(frag.name,i+1)
+            new_fragment_piece_objects.append(fragment.fragment(piece,new_name))
+    else:
+        new_fragment_piece_objects.append(frag)
+    return new_fragment_piece_objects
+
+def split_flist_hets(flist,min_het_count=3,max_het_frac=0.25):
+    
+    new_flist = []
+
+    for f in flist:
+        new_flist += split_fragment_hets(f,min_het_count,max_het_frac)
+                      
+    return new_flist
+    
+    
+def filter_flist_heterozygousity(flist,max_het=0.1):
+    
+    new_flist = []
+    for f in flist:
+        hom_count = 0
+        het_count = 0
+        
+        for pos, gpos, call, qual in f.seq:
+            if call == '2':
+                het_count += 1
+            elif call == '1' or call == '0':
+                hom_count += 1
+        
+        het_frac = het_count / (hom_count + het_count)
+        
+        if het_frac < max_het:
+            new_flist.append(f)
+        
+    return new_flist
+
+# next function that returns 0 instead of raising StopIteration
+# this is convenient for iterating over file 2 at a time
+def safenext(iterator):
+    try:
+        nextval = next(iterator)
+        return nextval
+    except StopIteration:
+        return 0
+
+# determine if two fragments are consistent with each other
+def consistent(f1, f2, i,j, contam_bounds, t):
+
+    answer = True
+    assert(f1.seq[0][0] <= f2.seq[0][0])
+
+    f2iter = iter(f2.seq) # iterator for fragment2
+    a2 = safenext(f2iter)
+    if not a2:
+        return answer, contam_bounds
+
+    mismatches = 0
+    done  = False
+    first_pos = True
+    switched = False
+    possible_switch_pos = None
+    last_pos = None
+    
+    for a1 in f1.seq:
+
+        if done:
+            break
+
+        while a1[0] > a2[0]:
+            a2 = safenext(f2iter)
+            if not a2:
+                done = True
+                break
+
+        if done or a1[0] < a2[0]:
+            continue
+
+        assert a1[0] == a2[0]
+        if first_pos:
+            switched = (a1[2] != a2[2])
             first_pos = False
 
-        if (a1[1] == a2[1] and not switched) or (a1[1] != a2[1] and switched):
+        if (a1[2] == a2[2] and not switched) or (a1[2] != a2[2] and switched):
             mismatches = 0
             possible_switch_pos = None
         else:
             if possible_switch_pos == None:
-                possible_switch_pos = a1[0]
+                possible_switch_pos = set(range(last_pos+1,a1[0]+1))
             mismatches += 1
             if mismatches >= t:
-                contam_bounds[(i,j)].add(possible_switch_pos)
+                contam_bounds[(i,j)] = set.union(contam_bounds[(i,j)], possible_switch_pos)
                 answer = False
                 switched = not switched
                 mismatches = 0
                 possible_switch_pos = None
 
+        last_pos = a1[0]
+                
         a2 = safenext(f2iter)
         if not a2:
             break
 
     contam_bounds[(j,i)] = contam_bounds[(i,j)]
 
-    return answer, contam_bounds
+    return answer, contam_bounds    
 
+def fragment_comparison_split(flist, threshold=3):
 
-def read_fragment_matrix(frag_matrix):
-
-    names = []
-    flist = []
-
-    with open(frag_matrix,"r") as fm:
-        for line in fm:
-            if len(line) < 2:
-                continue
-
-            el = line.strip().split()
-
-            num_blks      = int(el[0])
-            name = el[1]
-
-            call_list  = el[2:(2+2*num_blks)]              # extract base call part of line
-            call_list  = zip(*[iter(call_list)]*2)             # list -> tuple list conversion: credit to http://stackoverflow.com/questions/23286254/convert-list-to-a-list-of-tuples-python
-            call_list  = [(int(a)-1, b) for a,b in call_list]  # convert index to 0-based integer
-            call_list2 = []
-
-            for ix, blk in call_list:
-                curr_ix = ix
-                for a in blk:
-                    call_list2.append((curr_ix, a))
-                    curr_ix += 1
-
-            qlist = el[-1]
-            #qlist = [10**((ord(q) - 33) * -0.1) for q in qlist]
-
-            alist= [(a,b,c) for ((a,b),c) in zip(call_list2,qlist)]
-
-            flist.append(alist)
-            names.append(name)
-
-    zipped = zip(names,flist)
-    sorted_zipped = sorted(zipped,key=lambda x: x[1][0][0])
-    sorted_names, sorted_flist = [list(z) for z in zip(*sorted_zipped)]
-
-    return sorted_flist, sorted_names
-
-def matrixify_flist(flist,names, outfile):
-
-    max_ix = 0
-
-    for f in flist:
-
-        for a in f:
-
-            if a[0] > max_ix:
-
-                max_ix = a[0]
-
-    max_name = 0
-
-    for name in names:
-        if len(name) > max_name:
-            max_name = len(name)
-
-    with open(outfile,'w') as o:
-        for f,name in zip(flist,names):
-
-            line = [name.ljust(max_name+1)]+['-'] * max_ix
-            for a in f:
-                line[a[0]] = a[1]
-
-            pline = ''.join(line)
-
-            print(pline,file=o)
-
-
-def fix_chamber_contamination(fragments,outfile, threshold=4, filter_cov1=False):
-
+    flist = sorted(flist,key=lambda x: x.seq[0][0])
+    
     contam_bounds = defaultdict(set)
 
-    # read fragments into fragment data structure
-    flist, names = read_fragment_matrix(fragments)
-
-    if DEBUG:
-        matrixify_flist(flist,names, 'sim_data/pretty_fragmatrix')
-
     N = len(flist)
-    assert(N == len(names))
-
-    cov_counts = defaultdict(int)
-
-    for f in flist:
-
-        for a in f:
-
-            cov_counts[a[0]] += 1
-
-    # filter out positions with coverage 1
-    if filter_cov1:
-
-        filtered_flist = []
-        filtered_names = []
-
-        # for each fragment and name
-        for f,n in zip(flist,names):
-
-            new_f = []
-
-            for a in f:
-
-                # if coverage greater than 1
-                if cov_counts[a[0]] > 1:
-
-                    new_f.append(a)
-
-            # if the fragment has at least 2 alleles after filtering add it to new list
-            if len(new_f) >= 2:
-
-                filtered_flist.append(new_f)
-                filtered_names.append(n)
-
-        # overwrite the old fragments and names
-        flist = filtered_flist
-        names = filtered_names
 
     #for k in sorted(list(cov_counts.keys())):
     #    print("{}\t{}".format(k,cov_counts[k]))
-
-    # create a graph representing consistency of reads
-    #  0: reads do not overlap
-    # -1: reads are inconsistent
-    #  1: reads are consistent
-    C = np.zeros((N,N),dtype='int')
 
     for i in range(N):
         for j in range(i+1,N):
@@ -245,25 +271,11 @@ def fix_chamber_contamination(fragments,outfile, threshold=4, filter_cov1=False)
 
             cons,contam_bounds = consistent(f1,f2,i,j,contam_bounds, threshold)
 
-            if cons:
-                C[i,j] = 1
-                C[j,i] = 1
-
-            else:
-                C[i,j] = -1
-                C[j,i] = -1
-
     break_list = [set() for x in range(N)]
-
-    bad = np.sum((C == -1),1) # find how many inconsistents each fragment has
 
     for i in range(N):
 
-        if bad[i] == 0:
-            continue
-
         f1 = flist[i]
-        name = names[i]
 
         # consider repairing f1.
         # if f1 is inconsistent with multiple reads then we just split f1 where inconsistent.
@@ -272,110 +284,174 @@ def fix_chamber_contamination(fragments,outfile, threshold=4, filter_cov1=False)
 
         blist = []
         for j in range(N):
-            if C[i,j] != -1:
+            if (i,j) not in contam_bounds or contam_bounds[(i,j)] == set():
                 continue
             blist.append(j)
 
         for b1, b2 in itertools.combinations(blist,2):
 
-            common_error = set.intersection(contam_bounds[(i,b1)],contam_bounds[(i,b2)])
+            common_error = set.intersection(contam_bounds[(i,b1)], contam_bounds[(i,b2)])
+                        
             if common_error != set():
                 break_list[i] = break_list[i].union(common_error)
-                bad[i] -= len(common_error)
                 for bx in blist:
-                    bad[bx] -= len(common_error)
-                    contam_bounds[(i,bx)] -= common_error
-
-                if bad[i] == 0:
-                    break
+                    inter = set.intersection(common_error, contam_bounds[(i,bx)])
+                    if inter != set():
+                        rightward = next(iter(inter))
+                        leftward = rightward-1
+                        while rightward in contam_bounds[(i,bx)]:
+                            contam_bounds[(i,bx)].remove(rightward)
+                            rightward += 1
+                        while leftward in contam_bounds[(i,bx)]:
+                            contam_bounds[(i,bx)].remove(leftward)
+                            leftward -= 1                       
 
     new_flist = []
-    new_names = []
 
     for i in range(N):
 
         f1 = flist[i]
-        name = names[i]
 
         # consider repairing f1.
-        if bad[i] > 0:
-            for j in range(N):
+        for j in range(N):
 
-                if C[i,j] != -1:
-                    continue
-                if contam_bounds[(i,j)] != set(): # inconsistencies weren't previously fixed
-                    break_list[i] = contam_bounds[(i,j)]
+            if (i,j) in contam_bounds and contam_bounds[(i,j)] != set(): # inconsistencies weren't previously fixed
+                break_list[i] = set.union(break_list[i],contam_bounds[(i,j)])
 
         if break_list[i] == set():
             # add unedited fragment to new fragment list
             new_flist.append(f1)
-            new_names.append(name)
         else:
             # chop up fragment where necessary and add pieces to fragment list
-            new_f = []
+            new_seq = []
             name_ctr = 1
-            for allele in f1:
+            for allele in f1.seq:
 
                 if allele[0] in break_list[i]:
-                    if DEBUG:
-                        print("Breaking {} at pos {}, with coverage {}".format(name,allele[0], cov_counts[allele[0]]))
-                    else:
-                        print("Breaking {} at pos {}".format(name,allele[0]))
-                    if len(new_f) > 1:
-                        new_flist.append(new_f)
-                        new_names.append("{}:S{}".format(name,name_ctr))
+                    if VERBOSE:
+                        print("Breaking {} at pos {}".format(f1.name,allele[0]))
+                    if len(new_seq) > 1:
+                        new_name = "{}:S{}".format(f1.name,name_ctr)
+                        new_flist.append(fragment.fragment(new_seq,new_name))
                         name_ctr += 1
 
-                    new_f = []
+                    new_seq = []
 
-                new_f.append(allele)
+                new_seq.append(allele)
 
-            if len(new_f) > 1:
-                new_flist.append(new_f)
-                new_names.append("{}:S{}".format(name,name_ctr))
+            if len(new_seq) > 1:
+                new_name = "{}:S{}".format(f1.name,name_ctr)
+                new_flist.append(fragment.fragment(new_seq,new_name))
+                
+    return new_flist
+    
+def filter_discordant_fragments_SER(flist, SER_threshold):
+
+    flist = sorted(flist,key=lambda x: x.seq[0][0])
+    
+    N = len(flist)
+    #SER_total = np.zeros((N,N),dtype='float')
+    #SER_err = np.zeros((N,N),dtype='float')
+    new_flist = []
+
+    for i in range(N):
+        f1 = flist[i]
+#        total = 0
+#        err   = 0
+        errs = []
+        e_total = 0
+        t_total = 0
+        for j in range(i+1,N):
+
+            f2 = flist[j]
+
+            if not overlap(f1,f2,2):
+                #SER_total[i,j] = -1
+                #SER_total[j,i] = -1
+                #SER_err[i,j] = -1
+                #SER_err[j,i] = -1
+                continue
+
+            e, t = total_SER(f1,f2)
+            e_total += e
+            t_total += t
+            #SER_total[i,j] = t
+            #SER_total[j,i] = t
+            #SER_err[i,j] = e
+            #SER_err[j,i] = e
+#            total += t
+#            err   += e
+            errs.append(e/t)
+        
+        if t_total == 0 or e_total / t_total < SER_threshold: #len(errs) <= 1 or min(errs) < SER_threshold:
+            new_flist.append(f1)
+                
+    return new_flist
+    
+def filter_fragment_coverage(flist,coverage):
+
+    cov_counts = defaultdict(int)
+
+    for f in flist:
+
+        for a in f.seq:
+            
+            cov_counts[a[0]] += 1
+
+
+    filtered_flist = []
+
+    # for each fragment and name
+    for f in flist:
+
+        new_seq = []
+
+        for a in f.seq:
+
+            # if coverage greater than 1
+            if cov_counts[a[0]] >= coverage:
+
+                new_seq.append(a)
+
+        # if the fragment has at least 2 alleles after filtering add it to new list
+        if len(new_seq) >= 2:
+
+            filtered_flist.append(fragment.fragment(new_seq,f.name))
+    
+    return filtered_flist
+
+def fix_chamber_contamination_flist(flist, threshold=3, min_coverage=0):
+
+    # FILTER OUT FRAGMENTS BELOW MIN COVERAGE
+    if min_coverage > 1:
+        flist = filter_fragment_coverage(flist, min_coverage)
+
+    # FILTER OUT HIGHLY HETEROZYGOUS FRAGMENTS
+    flist = filter_flist_heterozygousity(flist, max_het=0.1)        
+
+    # SPLIT FRAGMENTS AT HETEROZYGOUS SPOTS
+    flist = split_flist_hets(flist, min_het_count=3,max_het_frac=0.25)
+
+    # SPLIT FRAGMENTS BASED ON FRAGMENT-FRAGMENT COMPARISON
+    flist = fragment_comparison_split(flist,threshold=3)
+
+    # FILTER OUT FRAGMENTS THAT ARE HIGHLY DISCORDANT
+    flist = filter_discordant_fragments_SER(flist, 0.3)
+    
+    return flist
+    
+def fix_chamber_contamination(fragmentfile, vcf_file, outfile, threshold=3, min_coverage=0):
+
+    # READ FRAGMENT MATRIX
+    flist = fragment.read_fragment_matrix(fragmentfile,vcf_file)
+    
+    flist = fix_chamber_contamination_flist(flist,threshold,min_coverage)
 
     # WRITE TO FILE
+    fragment.write_fragment_matrix(flist, outfile)
 
-    lines = []
-
-    for name, fs in zip(new_names, new_flist):
-        if len(fs) < 2:
-            continue
-
-        fragstr = ''
-        num_pairs = 0
-        prev_snp_ix = -2
-        qual = ' '
-        firstpos = fs[0][0]
-        for snp_ix, allele, q_char in fs:
-
-            diff = snp_ix - prev_snp_ix
-
-            if diff == 1:
-                fragstr += allele
-            else:
-                num_pairs += 1
-                fragstr += ' {} {}'.format(snp_ix+1, allele)
-
-            prev_snp_ix = snp_ix
-            qual += q_char
-
-        fragstr += qual
-
-        prefix = '{} {}'.format(num_pairs,name)
-        fragstr = prefix + fragstr
-
-        lines.append((firstpos, fragstr))
-
-    lines.sort()
-
-    with open(outfile, 'w') as opf:
-        for firstpos, line in lines:
-            print(line, file=opf)
-
-    if DEBUG:
-        matrixify_flist(new_flist,new_names, 'sim_data/pretty_fragmatrix_fixed')
-
+    #if DEBUG:
+    #    matrixify_flist(new_flist,new_names, 'sim_data/pretty_fragmatrix_fixed')
 
 if __name__ == '__main__':
     args = parse_args()
