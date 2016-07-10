@@ -5,8 +5,8 @@ __default__:
     group:           bansal-group
     qsub_stdout_dir: sissor_project/stdout
     job_name:        snakemake_job
-    ppn:             1
-    walltime:        '10:00:00'
+    ppn:             2
+    walltime:        '30:00:00'
 
 calculate_error_rates:
     ppn: 1

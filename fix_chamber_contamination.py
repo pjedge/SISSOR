@@ -12,6 +12,7 @@ from collections import defaultdict
 import itertools
 
 DEBUG = False
+ID_LEN_NO_MODS = 5
 
 def parse_args():
 
@@ -19,8 +20,8 @@ def parse_args():
     # paths to samfiles mapping the same ordered set of RNA reads to different genomes
     parser.add_argument('-f', '--fragments', nargs='?', type = str, help='fragment file to process')
     parser.add_argument('-o', '--output', nargs='?', type = str, help='output fragments')
-    parser.add_argument('-t', '--threshold', nargs='?', type = float, help='number of consecutive mismatches with respect to another fragment that count as contamination', default = 4)
-    parser.add_argument('-c', '--filter_cov1', action='store_true', help='filter out positions with coverage 1', default = False)
+    parser.add_argument('-t', '--threshold', nargs='?', type = int, help='number of consecutive mismatches with respect to another fragment that count as contamination', default = 4)
+    parser.add_argument('-f', '--filter', nargs='?', type = int, help='filter for only positions with coverage >= this amount', default = 0)
 
 
     # default to help option. credit to unutbu: http://stackoverflow.com/questions/4042452/display-help-message-with-python-argparse-when-script-is-called-without-any-argu
@@ -105,6 +106,11 @@ def consistent(f1, f2, i,j, contam_bounds, t):
 
     return answer, contam_bounds
 
+def sort_flist(flist,names):
+    zipped = zip(names,flist)
+    sorted_zipped = sorted(zipped,key=lambda x: x[1][0][0])
+    sorted_names, sorted_flist = [list(z) for z in zip(*sorted_zipped)]
+    return sorted_flist, sorted_names
 
 def read_fragment_matrix(frag_matrix):
 
@@ -140,11 +146,9 @@ def read_fragment_matrix(frag_matrix):
             flist.append(alist)
             names.append(name)
 
-    zipped = zip(names,flist)
-    sorted_zipped = sorted(zipped,key=lambda x: x[1][0][0])
-    sorted_names, sorted_flist = [list(z) for z in zip(*sorted_zipped)]
+    flist, names = sort_flist(flist,names)
 
-    return sorted_flist, sorted_names
+    return flist, names
 
 def matrixify_flist(flist,names, outfile):
 
@@ -176,18 +180,12 @@ def matrixify_flist(flist,names, outfile):
             print(pline,file=o)
 
 
-def fix_chamber_contamination(fragments,outfile, threshold=4, filter_cov1=False):
+def fix_chamber_contamination(fragments,outfile,vcf_file,threshold=4, filter=0):
 
     contam_bounds = defaultdict(set)
 
     # read fragments into fragment data structure
     flist, names = read_fragment_matrix(fragments)
-
-    if DEBUG:
-        matrixify_flist(flist,names, 'sim_data/pretty_fragmatrix')
-
-    N = len(flist)
-    assert(N == len(names))
 
     cov_counts = defaultdict(int)
 
@@ -197,33 +195,42 @@ def fix_chamber_contamination(fragments,outfile, threshold=4, filter_cov1=False)
 
             cov_counts[a[0]] += 1
 
-    # filter out positions with coverage 1
-    if filter_cov1:
-        
+    # filter out positions with coverage below "filter"
+    if filter >= 2:
+
         filtered_flist = []
-        filtered_names = []        
-        
+        filtered_names = []
+
         # for each fragment and name
         for f,n in zip(flist,names):
-            
+
             new_f = []
-            
+
             for a in f:
-                
-                # if coverage greater than 1
-                if cov_counts[a[0]] > 1:
-                    
+
+                # if coverage greater than filter
+                if cov_counts[a[0]] >= filter:
+
                     new_f.append(a)
-                    
+
             # if the fragment has at least 2 alleles after filtering add it to new list
             if len(new_f) >= 2:
-                
+
                 filtered_flist.append(new_f)
                 filtered_names.append(n)
-                
+
         # overwrite the old fragments and names
         flist = filtered_flist
         names = filtered_names
+
+    # re-sort flist
+    flist, names = sort_flist(flist,names)
+
+    if DEBUG:
+        matrixify_flist(flist,names, 'sim_data/pretty_fragmatrix')
+
+    N = len(flist)
+    assert(N == len(names))
 
     #for k in sorted(list(cov_counts.keys())):
     #    print("{}\t{}".format(k,cov_counts[k]))
@@ -304,7 +311,7 @@ def fix_chamber_contamination(fragments,outfile, threshold=4, filter_cov1=False)
                 if C[i,j] != -1:
                     continue
                 if contam_bounds[(i,j)] != set(): # inconsistencies weren't previously fixed
-                    break_list[i] = contam_bounds[(i,j)]
+                    break_list[i] = break_list[i].union(contam_bounds[(i,j)])
 
         if break_list[i] == set():
             # add unedited fragment to new fragment list
@@ -334,6 +341,22 @@ def fix_chamber_contamination(fragments,outfile, threshold=4, filter_cov1=False)
                 new_flist.append(new_f)
                 new_names.append("{}:S{}".format(name,name_ctr))
 
+
+    # build a dict of vcf genomic positions
+    snp_ix = 0
+    vcf_dict = dict()
+    with open(vcf_file,'r') as infile:
+        for line in infile:
+            if line[:1] == '#':
+                continue
+            el = line.strip().split('\t')
+            if len(el) < 5:
+                continue
+
+            genomic_pos = int(el[1])-1
+            vcf_dict[snp_ix] = genomic_pos
+            snp_ix += 1
+
     # WRITE TO FILE
 
     lines = []
@@ -341,6 +364,11 @@ def fix_chamber_contamination(fragments,outfile, threshold=4, filter_cov1=False)
     for name, fs in zip(new_names, new_flist):
         if len(fs) < 2:
             continue
+
+        if len(name.split(":")) > ID_LEN_NO_MODS:
+            f_start = vcf_dict[fs[0][0]]
+            f_end   = vcf_dict[fs[-1][0]]
+            name = "{}:{}-{}".format(name,f_start,f_end)
 
         fragstr = ''
         num_pairs = 0
@@ -379,4 +407,4 @@ def fix_chamber_contamination(fragments,outfile, threshold=4, filter_cov1=False)
 
 if __name__ == '__main__':
     args = parse_args()
-    fix_chamber_contamination(args.fragments,args.output, args.threshold, args.filter_cov1)
+    fix_chamber_contamination(args.fragments,args.output, args.threshold, args.filter)
