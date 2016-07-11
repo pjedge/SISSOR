@@ -14,6 +14,7 @@ import itertools
 
 VERBOSE = False
 DEBUG = False
+ID_LEN_NO_MODS = 5
 
 def parse_args():
 
@@ -21,8 +22,8 @@ def parse_args():
     # paths to samfiles mapping the same ordered set of RNA reads to different genomes
     parser.add_argument('-f', '--fragments', nargs='?', type = str, help='fragment file to process')
     parser.add_argument('-o', '--output', nargs='?', type = str, help='output fragments')
-    parser.add_argument('-t', '--threshold', nargs='?', type = float, help='number of consecutive mismatches with respect to another fragment that count as contamination', default = 4)
-    parser.add_argument('-c', '--filter_cov1', action='store_true', help='filter out positions with coverage 1', default = False)
+    parser.add_argument('-t', '--threshold', nargs='?', type = int, help='number of consecutive mismatches with respect to another fragment that count as contamination', default = 4)
+    parser.add_argument('-f', '--filter', nargs='?', type = int, help='filter for only positions with coverage >= this amount', default = 0)
 
 
     # default to help option. credit to unutbu: http://stackoverflow.com/questions/4042452/display-help-message-with-python-argparse-when-script-is-called-without-any-argu
@@ -43,11 +44,11 @@ def overlap(f1, f2, amt=1):
 
     return len(inter) >= amt
 
-    
+
 def total_SER(f1, f2):
 
     assert(f1.seq[0][0] <= f2.seq[0][0])
-    
+
     f2iter = iter(f2.seq) # iterator for fragment2
     a2 = safenext(f2iter)
     if not a2:
@@ -77,7 +78,7 @@ def total_SER(f1, f2):
         if first_pos:
             switched = (a1[2] != a2[2])
             first_pos = False
-        
+
         total_pos += 1
         if (a1[2] != a2[2] and not switched) or (a1[2] == a2[2] and switched):
             switches += 1
@@ -90,39 +91,39 @@ def total_SER(f1, f2):
     return switches, total_pos
 
 def get_het_breakpoints(frag,min_het_count=3,max_het_frac=0.25):
-    
+
     breaks = []
-    
+
     for i in range(len(frag.seq)):
         if frag.seq[i][2] != '2':
             continue
-            
+
         hom_count = 0
         het_count = 0
-        
+
         for j in range(i,len(frag.seq)):
             if frag.seq[j][2] == '2':
                 het_count += 1
-                
+
                 het_frac = het_count/(hom_count+het_count)
 
                 if het_count >= min_het_count and het_frac >= max_het_frac:
                     breaks.append((i,j))
-                
+
             else:
                 hom_count += 1
-                
+
     breakpos = set()
     for i,j in breaks:
         for k in range(i,j+1):
             breakpos.add(frag.seq[k][0])
-            
+
     return breakpos
-    
+
 def split_fragment_hets(frag,min_het_count=3,max_het_frac=0.25):
 
     breakpos = get_het_breakpoints(frag,min_het_count,max_het_frac)
-    
+
     new_fragment_pieces = []
     new_piece = []
     split_occured = False
@@ -139,7 +140,7 @@ def split_fragment_hets(frag,min_het_count=3,max_het_frac=0.25):
     if len(new_piece) >= 2:
         new_fragment_pieces.append(new_piece)
     new_piece = []
-                
+
     new_fragment_piece_objects = []
     if split_occured:
         for i, piece in enumerate(new_fragment_pieces):
@@ -150,33 +151,33 @@ def split_fragment_hets(frag,min_het_count=3,max_het_frac=0.25):
     return new_fragment_piece_objects
 
 def split_flist_hets(flist,min_het_count=3,max_het_frac=0.25):
-    
+
     new_flist = []
 
     for f in flist:
         new_flist += split_fragment_hets(f,min_het_count,max_het_frac)
-                      
+
     return new_flist
-    
-    
+
+
 def filter_flist_heterozygousity(flist,max_het=0.1):
-    
+
     new_flist = []
     for f in flist:
         hom_count = 0
         het_count = 0
-        
+
         for pos, gpos, call, qual in f.seq:
             if call == '2':
                 het_count += 1
             elif call == '1' or call == '0':
                 hom_count += 1
-        
+
         het_frac = het_count / (hom_count + het_count)
-        
+
         if het_frac < max_het:
             new_flist.append(f)
-        
+
     return new_flist
 
 # next function that returns 0 instead of raising StopIteration
@@ -205,7 +206,7 @@ def consistent(f1, f2, i,j, contam_bounds, t):
     switched = False
     possible_switch_pos = None
     last_pos = None
-    
+
     for a1 in f1.seq:
 
         if done:
@@ -240,22 +241,31 @@ def consistent(f1, f2, i,j, contam_bounds, t):
                 possible_switch_pos = None
 
         last_pos = a1[0]
-                
+
         a2 = safenext(f2iter)
         if not a2:
             break
 
     contam_bounds[(j,i)] = contam_bounds[(i,j)]
 
-    return answer, contam_bounds    
+    return answer, contam_bounds
 
 def fragment_comparison_split(flist, threshold=3):
 
     flist = sorted(flist,key=lambda x: x.seq[0][0])
-    
+
     contam_bounds = defaultdict(set)
 
     N = len(flist)
+
+    # re-sort flist
+    flist, names = sort_flist(flist,names)
+
+    if DEBUG:
+        matrixify_flist(flist,names, 'sim_data/pretty_fragmatrix')
+
+    N = len(flist)
+    assert(N == len(names))
 
     #for k in sorted(list(cov_counts.keys())):
     #    print("{}\t{}".format(k,cov_counts[k]))
@@ -291,7 +301,7 @@ def fragment_comparison_split(flist, threshold=3):
         for b1, b2 in itertools.combinations(blist,2):
 
             common_error = set.intersection(contam_bounds[(i,b1)], contam_bounds[(i,b2)])
-                        
+
             if common_error != set():
                 break_list[i] = break_list[i].union(common_error)
                 for bx in blist:
@@ -304,7 +314,7 @@ def fragment_comparison_split(flist, threshold=3):
                             rightward += 1
                         while leftward in contam_bounds[(i,bx)]:
                             contam_bounds[(i,bx)].remove(leftward)
-                            leftward -= 1                       
+                            leftward -= 1
 
     new_flist = []
 
@@ -342,13 +352,13 @@ def fragment_comparison_split(flist, threshold=3):
             if len(new_seq) > 1:
                 new_name = "{}:S{}".format(f1.name,name_ctr)
                 new_flist.append(fragment.fragment(new_seq,new_name))
-                
+
     return new_flist
-    
+
 def filter_discordant_fragments_SER(flist, SER_threshold):
 
     flist = sorted(flist,key=lambda x: x.seq[0][0])
-    
+
     N = len(flist)
     #SER_total = np.zeros((N,N),dtype='float')
     #SER_err = np.zeros((N,N),dtype='float')
@@ -382,12 +392,12 @@ def filter_discordant_fragments_SER(flist, SER_threshold):
 #            total += t
 #            err   += e
             errs.append(e/t)
-        
+
         if t_total == 0 or e_total / t_total < SER_threshold: #len(errs) <= 1 or min(errs) < SER_threshold:
             new_flist.append(f1)
-                
+
     return new_flist
-    
+
 def filter_fragment_coverage(flist,coverage):
 
     cov_counts = defaultdict(int)
@@ -395,7 +405,7 @@ def filter_fragment_coverage(flist,coverage):
     for f in flist:
 
         for a in f.seq:
-            
+
             cov_counts[a[0]] += 1
 
 
@@ -417,7 +427,7 @@ def filter_fragment_coverage(flist,coverage):
         if len(new_seq) >= 2:
 
             filtered_flist.append(fragment.fragment(new_seq,f.name))
-    
+
     return filtered_flist
 
 def fix_chamber_contamination_flist(flist, threshold=3, min_coverage=0):
@@ -427,7 +437,7 @@ def fix_chamber_contamination_flist(flist, threshold=3, min_coverage=0):
         flist = filter_fragment_coverage(flist, min_coverage)
 
     # FILTER OUT HIGHLY HETEROZYGOUS FRAGMENTS
-    flist = filter_flist_heterozygousity(flist, max_het=0.1)        
+    flist = filter_flist_heterozygousity(flist, max_het=0.1)
 
     # SPLIT FRAGMENTS AT HETEROZYGOUS SPOTS
     flist = split_flist_hets(flist, min_het_count=3,max_het_frac=0.25)
@@ -437,14 +447,14 @@ def fix_chamber_contamination_flist(flist, threshold=3, min_coverage=0):
 
     # FILTER OUT FRAGMENTS THAT ARE HIGHLY DISCORDANT
     flist = filter_discordant_fragments_SER(flist, 0.3)
-    
+
     return flist
     
 def fix_chamber_contamination(fragmentfile, vcf_file, outfile, threshold=2, min_coverage=0):
 
     # READ FRAGMENT MATRIX
     flist = fragment.read_fragment_matrix(fragmentfile,vcf_file)
-    
+
     flist = fix_chamber_contamination_flist(flist,threshold,min_coverage)
 
     # WRITE TO FILE
@@ -455,4 +465,4 @@ def fix_chamber_contamination(fragmentfile, vcf_file, outfile, threshold=2, min_
 
 if __name__ == '__main__':
     args = parse_args()
-    fix_chamber_contamination(args.fragments,args.output, args.threshold, args.filter_cov1)
+    fix_chamber_contamination(args.fragments,args.output, args.threshold, args.filter)
