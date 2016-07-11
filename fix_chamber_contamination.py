@@ -423,24 +423,24 @@ def filter_fragment_coverage(flist,coverage):
 
 def fix_chamber_contamination_flist(flist, threshold=3, min_coverage=0):
 
-    # FILTER OUT FRAGMENTS BELOW MIN COVERAGE
-    if min_coverage > 1:
-        flist = filter_fragment_coverage(flist, min_coverage)
-
     # FILTER OUT HIGHLY HETEROZYGOUS FRAGMENTS
-    flist = filter_flist_heterozygousity(flist, max_het=0.1)
+    flist = filter_flist_heterozygousity(flist, max_het=0.2)
 
     # SPLIT FRAGMENTS AT HETEROZYGOUS SPOTS
     flist = split_flist_hets(flist, min_het_count=3,max_het_frac=0.25)
 
     # SPLIT FRAGMENTS BASED ON FRAGMENT-FRAGMENT COMPARISON
-    flist = fragment_comparison_split(flist,threshold=3)
+    flist = fragment_comparison_split(flist,threshold)
 
     # FILTER OUT FRAGMENTS THAT ARE HIGHLY DISCORDANT
-    flist = filter_discordant_fragments_SER(flist, 0.3)
+    #flist = filter_discordant_fragments_SER(flist, 0.3)
+
+    # FILTER OUT FRAGMENTS BELOW MIN COVERAGE
+    if min_coverage > 1:
+        flist = filter_fragment_coverage(flist, min_coverage)
 
     return flist
-    
+
 def fix_chamber_contamination(fragmentfile, vcf_file, outfile, threshold=2, min_coverage=0):
 
     # READ FRAGMENT MATRIX

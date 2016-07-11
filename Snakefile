@@ -11,7 +11,7 @@ configfile: "config.yaml"
 localrules: all, plot_hapcut2_results, simlinks, clean
 
 import sys
-#sys.path.append(config['haptools_dir'])
+sys.path.append(config['haptools_dir'])
 import run_tools
 import error_rates
 import fileIO
@@ -38,8 +38,8 @@ samples = ['PGP1_ALL','PGP1_21','PGP1_22','PGP1_A1']
 
 rule all:
     input:
-        #expand("{P}/sissor_hapcut2.png",P=config['plots_dir']),
-        expand("{d}/{s}/augmented_fragmat/cov1/normal/{c}",d=data_dir, s=samples[1:], c=chroms)
+        expand("{P}/sissor_hapcut2.png",P=config['plots_dir']),
+        #expand("{d}/{s}/augmented_fragmat/cov1/normal/{c}",d=data_dir, s=samples[1:], c=chroms)
         # "new" snipped out runs
         #hapblocks = expand("{E}/hapcut2_{s}/{c}.output",E=experiments_dir,s=runs,c=chroms),
         #runtime = expand("{E}/hapcut2_{s}/{c}.runtime",E=experiments_dir,s=runs,c=chroms)
@@ -59,7 +59,7 @@ rule plot_hapcut2_results:
         plot_data.plot_experiment_sissor(data,labels,[],output.plot)
 
 exp =['cov1','cov2','cov3']
-exp_labels=['All fragments','Cov >= 2','Cov >= 3',]
+exp_labels=['All fragments','Cov >= 2','Cov >= 3']
 rule calculate_error_rates:
     params:
         job_name = "hapcut2_error_rates"
@@ -108,37 +108,46 @@ rule run_hapcut2:
         runtime = "{E}/hapcut2_{s}/{x}/{c}.runtime"
     run:
         # run hapcut
-        runtime = run_tools.run_hapcut2(config['hapcut2'], input.frag_file, input.vcf_file, output.hapblocks, 1000, 25, 1, 0, 5, 0.95,'')
+        runtime = run_tools.run_hapcut2(config['hapcut2'], input.frag_file, input.vcf_file, output.hapblocks, 5, 0.95, '')
         with open(output.runtime,'w') as rf:
             print(runtime, file=rf)
 
 # COMBINE FRAGMENT MATRICES
-rule merge_and_fix_fragmat:
+rule fix_fragmat:
     params:
-        job_name  = "merge_and_fix_fragmat.{x}",
+        job_name  = "fix_fragmat.{x}",
     input:
-        P21      = expand("{{data_dir}}/PGP1_21/fragmat/cov1/normal/{c}",c=chroms),
-        P22      = expand("{{data_dir}}/PGP1_22/fragmat/cov1/normal/{c}",c=chroms),
-        PA1      = expand("{{data_dir}}/PGP1_A1/fragmat/cov1/normal/{c}",c=chroms),
-        var_vcfs = expand("{{data_dir}}/PGP1_VCFs/{CHR}.vcf",CHR=chroms)
+        var_vcfs = expand("{dat}/PGP1_VCFs/{CHR}.vcf",dat=data_dir,CHR=chroms),
+        P_ALL = expand("{dat}/PGP1_ALL/augmented_fragmat/cov1/normal/{c}",dat=data_dir,c=chroms)
     output:
         fixed = expand("{{data_dir}}/PGP1_ALL/fragmat/{{x}}/fixed/{c}",c=chroms)
     run:
-        P_ALL = expand("{dat}/PGP1_ALL/fragmat/{exp}/normal/{c}",dat=data_dir,exp=wildcards.x,c=chroms)
-        merged_dir = "{}/PGP1_ALL/fragmat/{}/normal".format(data_dir,wildcards.x)
-        shell('mkdir -p {merged_dir}')
-        for i1, i2, i3, o in zip(input.P21, input.P22, input.PA1, P_ALL):
+        for i, v, o in zip(input.P_ALL, input.var_vcfs, output.fixed):
+            if wildcards.x == 'cov3':
+                fix_chamber_contamination(i,v,o,threshold=2, min_coverage=3)
+            elif wildcards.x == 'cov2':
+                fix_chamber_contamination(i,v,o,threshold=2, min_coverage=2)
+            else:
+                fix_chamber_contamination(i,v,o,threshold=2, min_coverage=0)
+
+
+# COMBINE FRAGMENT MATRICES
+rule merge_fragmat:
+    params:
+        job_name  = "merge_fragmat",
+    input:
+        P21      = expand("{dat}/PGP1_21/augmented_fragmat/cov1/normal/{c}",dat=data_dir,c=chroms),
+        P22      = expand("{dat}/PGP1_22/augmented_fragmat/cov1/normal/{c}",dat=data_dir,c=chroms),
+        PA1      = expand("{dat}/PGP1_A1/augmented_fragmat/cov1/normal/{c}",dat=data_dir,c=chroms),
+        var_vcfs = expand("{dat}/PGP1_VCFs/{CHR}.vcf",dat=data_dir,CHR=chroms)
+    output:
+        P_ALL = expand("{dat}/PGP1_ALL/augmented_fragmat/cov1/normal/{c}",dat=data_dir,c=chroms)
+    run:
+        for i1, i2, i3, o in zip(input.P21, input.P22, input.PA1, output.P_ALL):
             shell('cat {i1} {i2} {i3} > {o}')
 
-        for i, o, v in zip(P_ALL, output.fixed, input.var_vcfs):
-            if wildcards.x == 'cov3':
-                fix_chamber_contamination(i,o,v,2,3)
-            elif wildcards.x == 'cov2':
-                fix_chamber_contamination(i,o,v,2,2)
-            else:
-                fix_chamber_contamination(i,o,v,2,0)
-
 # CREATE FRAGMENT MATRIX FILES FOR EXPERIMENT
+'''
 rule create_fragmat:
     params:
         job_name  = "{s}.create_fragmat",
@@ -155,7 +164,7 @@ rule create_fragmat:
         create_hapcut_fragment_matrices_freebayes(input.ploidy1_vcfs, input.ploidy2_vcfs, input.beds, chambers_pad, input.var_vcfs, output_dir)
         #else:
         #    create_hapcut_fragment_matrices_freebayes(input.ploidy1_vcfs, input.beds, chambers_pad, input.var_vcfs, output_dir)
-
+'''
 
 # CREATE AUGMENTED FRAGMENT MATRIX FILES WITH HETEROZYGOUS CALL LOCATIONS
 # SAME FORMAT AS BEFORE, BUT NOW '2' represents a heterozygous call
