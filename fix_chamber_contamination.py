@@ -258,15 +258,6 @@ def fragment_comparison_split(flist, threshold=3):
 
     N = len(flist)
 
-    # re-sort flist
-    flist, names = sort_flist(flist,names)
-
-    if DEBUG:
-        matrixify_flist(flist,names, 'sim_data/pretty_fragmatrix')
-
-    N = len(flist)
-    assert(N == len(names))
-
     #for k in sorted(list(cov_counts.keys())):
     #    print("{}\t{}".format(k,cov_counts[k]))
 
