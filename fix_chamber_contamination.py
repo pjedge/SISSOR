@@ -440,7 +440,7 @@ def fix_chamber_contamination_flist(flist, threshold=3, min_coverage=0):
     
     return flist
     
-def fix_chamber_contamination(fragmentfile, vcf_file, outfile, threshold=3, min_coverage=0):
+def fix_chamber_contamination(fragmentfile, vcf_file, outfile, threshold=2, min_coverage=0):
 
     # READ FRAGMENT MATRIX
     flist = fragment.read_fragment_matrix(fragmentfile,vcf_file)
