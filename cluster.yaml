@@ -8,6 +8,10 @@ __default__:
     ppn:             2
     walltime:        '30:00:00'
 
+prune_haplotype:
+    ppn: 1
+    walltime: '2:00:00'
+
 calculate_error_rates:
     ppn: 1
     walltime: '4:00:00'
@@ -16,13 +20,21 @@ run_hapcut2:
     ppn: 1
     walltime: '20:00:00'
 
-merge_and_fix_fragmat:
+merge_fragmat:
+    ppn: 1
+    walltime: '1:00:00'
+
+fix_fragmat:
     ppn: 2
     walltime: '4:00:00'
 
-create_fragmat:
+make_fixed_beds:
     ppn: 2
-    walltime: '20:00:00'
+    walltime: '3:00:00'
+
+create_augmented_fragmat:
+    ppn: 2
+    walltime: '30:00:00'
 
 sample_jobs:
     ppn:      2

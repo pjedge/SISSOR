@@ -21,6 +21,9 @@ from os.path import join
 from create_hapcut_fragment_matrix import create_hapcut_fragment_matrices_freebayes
 from fix_chamber_contamination import fix_chamber_contamination
 import pickle
+from collections import defaultdict
+from plot_sissor import plot_sissor
+
 # qsub stderr and stdout directories are not automatically created by snakemake!
 if not os.path.exists(config['qsub_stdout_dir']):
     os.makedirs(config['qsub_stdout_dir'])
@@ -30,19 +33,20 @@ if not os.path.exists(config['qsub_stdout_dir']):
 data_dir = config["data_dir"]
 experiments_dir = config["experiments_dir"]
 plots_dir = config["plots_dir"]
-variant_vcf_dir = join(data_dir,'PGP1_VCFs')
 chambers = list(range(1,25))
 chambers_pad = ['{0:02d}'.format(c) for c in chambers]
 chroms  = ['chr{}'.format(i) for i in range(1,23)]
 samples = ['PGP1_ALL','PGP1_21','PGP1_22','PGP1_A1']
+cells=samples[1:]
+
+variant_vcf_dir = join(data_dir,'PGP1_VCFs')
+variant_vcf_dir_fp = join(data_dir,'PGP1_VCFs_w_false_positives')
 
 rule all:
     input:
-        expand("{P}/sissor_hapcut2.png",P=config['plots_dir']),
-        #expand("{d}/{s}/augmented_fragmat/cov1/normal/{c}",d=data_dir, s=samples[1:], c=chroms)
-        # "new" snipped out runs
-        #hapblocks = expand("{E}/hapcut2_{s}/{c}.output",E=experiments_dir,s=runs,c=chroms),
-        #runtime = expand("{E}/hapcut2_{s}/{c}.runtime",E=experiments_dir,s=runs,c=chroms)
+        expand("{P}/sissor_haplotype_error_chromosome.png",P=config['plots_dir']),
+        expand("{P}/sissor_haplotype_error_genome.png",P=config['plots_dir']),
+        #expand("{d}/{s}/fixed_beds/ch{ch}.bed",d=data_dir,s=cells,ch=chambers)
 
 # PLOT RESULTS
 rule plot_hapcut2_results:
@@ -52,22 +56,24 @@ rule plot_hapcut2_results:
         stats_file  = "{}/hapcut2.stats.p".format(config['error_rates_dir']),
         labels_file = "{}/hapcut2.labels.p".format(config['error_rates_dir'])
     output:
-        plot = "%s/sissor_hapcut2.png" % config['plots_dir']
+        plot1 = "%s/sissor_haplotype_error_chromosome.png" % config['plots_dir'],
+        plot2 = "%s/sissor_haplotype_error_genome.png" % config['plots_dir']
     run:
         data = pickle.load(open(input.stats_file,"rb"))
         labels = pickle.load(open(input.labels_file,"rb"))
-        plot_data.plot_experiment_sissor(data,labels,[],output.plot)
+        plot_data.plot_experiment_sissor(data[1:3],labels[1:3],[],output.plot1)
+        plot_sissor(data,labels,output.plot2)
 
-exp =['cov1','cov2','cov3']
-exp_labels=['All fragments','Cov >= 2','Cov >= 3']
+exp =['cov1_none','cov1_basic','cov1_strict','cov2_basic']
+exp_labels=['No processing','Basic Processing','Strict Processing','Basic Processing, coverage >= 2']
 rule calculate_error_rates:
     params:
         job_name = "hapcut2_error_rates"
     input:
         hapblocks = expand("{E}/hapcut2_PGP1_ALL/{exp}/{c}.output",E=experiments_dir,exp=exp,c=chroms),
         runtimes  = expand("{E}/hapcut2_PGP1_ALL/{exp}/{c}.runtime",E=experiments_dir,exp=exp,c=chroms),
-        fragmats  = expand("{d}/PGP1_ALL/fragmat/{exp}/fixed/{c}",d=data_dir,exp=exp,c=chroms),
-        var_vcfs  = expand("{v}/{c}.vcf", v=variant_vcf_dir,c=chroms),
+        fragmats  = expand("{d}/PGP1_ALL/fragmat/{exp}/{c}",d=data_dir,exp=exp,c=chroms),
+        var_vcfs  = expand("{v}/{c}.vcf",v=variant_vcf_dir,c=chroms),
         bac_haps  = expand("{bac}/{c}.filtered",bac=config['BAC_hapblocks'], c=chroms)
     output:
         stats_file  = "{}/hapcut2.stats.p".format(config['error_rates_dir']),
@@ -82,89 +88,126 @@ rule calculate_error_rates:
             for c in chroms: # chromosome
                 assembly_file = "{}/hapcut2_PGP1_ALL/{}/{}.output".format(config['experiments_dir'],x,c)
                 runtime_file  = "{}/hapcut2_PGP1_ALL/{}/{}.runtime".format(config['experiments_dir'],x,c)
-                frag_file     = "{}/PGP1_ALL/fragmat/{}/fixed/{}".format(data_dir,x,c)
+                frag_file     = "{}/PGP1_ALL/fragmat/{}/{}".format(data_dir,x,c)
                 vcf_file      = "{}/{}.vcf".format(variant_vcf_dir,c)
                 truth_file    = "{}/{}.filtered".format(config['BAC_hapblocks'], c)
                 err = error_rates.hapblock_hapblock_error_rate(truth_file, assembly_file, frag_file, vcf_file, runtime_file)
                 datalist.append(err)
 
             print("{} results over all chromosomes:".format(x))
-            print(sum(datalist,error_rates.error_result(None, 0, 0, 0, 0, 0, 0, 0, None,[],[],[])))
+            print(sum(datalist,error_rates.error_result()))
 
             data.append(datalist)
 
         pickle.dump(data,open(output.stats_file,"wb"))
         pickle.dump(labels,open(output.labels_file,"wb"))
 
+
+# RUN HAPCUT2
+rule prune_haplotype:
+    params:
+        job_name = "{s}.{x}.prune_haplotype",
+    input:
+        hapblocks = expand("{E}/hapcut2_{{s}}/{{x}}/{c}.output.uncorrected",E=experiments_dir,c=chroms)
+    output:
+        hapblocks = expand("{E}/hapcut2_{{s}}/{{x}}/{c}.output",E=experiments_dir,c=chroms)
+    run:
+        for i, o in zip(input.hapblocks,output.hapblocks):
+            fileIO.prune_hapblock_file(i, o, snp_conf_cutoff=0.95, split_conf_cutoff=0.9999, use_refhap_heuristic=True)
+
 # RUN HAPCUT2
 rule run_hapcut2:
     params:
         job_name = "{s}.{c}.{x}.hapcut",
     input:
-        frag_file = "%s/{s}/fragmat/{x}/fixed/{c}" % data_dir,
+        frag_file = "%s/{s}/fragmat/{x}/{c}" % data_dir,
         vcf_file  = lambda wildcards: expand("{v}/{c}.vcf", v=variant_vcf_dir,c=wildcards.c)
     output:
-        hapblocks = "{E}/hapcut2_{s}/{x}/{c}.output",
+        hapblocks = "{E}/hapcut2_{s}/{x}/{c}.output.uncorrected",
         runtime = "{E}/hapcut2_{s}/{x}/{c}.runtime"
     run:
         # run hapcut
-        runtime = run_tools.run_hapcut2(config['hapcut2'], input.frag_file, input.vcf_file, output.hapblocks, 5, 0.95, '')
+        runtime = run_tools.run_hapcut2(config['hapcut2'], input.frag_file, input.vcf_file, output.hapblocks, 5, 0.8, '--ea 1')
         with open(output.runtime,'w') as rf:
             print(runtime, file=rf)
+
+# CREATE BED FILES FOR THE NEW FIXED FRAGMENTS
+rule make_fixed_beds:
+    params:
+        job_name  = "make_fixed_beds",
+    input:
+        expand("{d}/PGP1_ALL/fragmat/cov1_strict/{c}",d=data_dir,c=chroms)
+    output:
+        expand("{d}/{s}/fixed_beds/ch{ch}.bed",d=data_dir,s=cells,ch=chambers)
+    run:
+        cell_boundaries = defaultdict(list) # key: (cell,chamber#,chrom)  value: (start, end)
+
+        for chrom in chroms:
+            infile = "{}/PGP1_ALL/fragmat/cov1_strict/{}".format(data_dir,chrom)
+            with open(infile,'r') as inf:
+                for line in inf:
+                    if len(line) < 3:
+                        continue
+                    el = line.strip().split()
+                    ID = el[1]
+                    el2 = ID.split(':')
+                    boundstr = el2[-1]
+                    (start, end) = [int(x) for x in boundstr.split('-')]
+                    cell = el2[2]
+                    chamber = el2[3]
+                    chambernum = int(chamber[2:])
+                    cell_boundaries[(cell,chambernum,chrom)].append((start, end))
+
+        for cell in cells:
+            for chamber in chambers:
+                outfile = '{}/{}/fixed_beds/ch{}.bed'.format(data_dir,cell,chamber)
+                with open(outfile,'w') as of:
+                    for chrom in chroms:
+                        cell_boundaries[(cell,chamber,chrom)].sort()
+                        for start, end in cell_boundaries[(cell,chamber,chrom)]:
+                            line = '{}\t{}\t{}\t{}\tchamber{}'.format(chrom, start, end, end-start, chamber)
+                            print(line,file=of)
 
 # COMBINE FRAGMENT MATRICES
 rule fix_fragmat:
     params:
         job_name  = "fix_fragmat.{x}",
     input:
-        var_vcfs = expand("{dat}/PGP1_VCFs/{CHR}.vcf",dat=data_dir,CHR=chroms),
-        P_ALL = expand("{dat}/PGP1_ALL/augmented_fragmat/cov1/normal/{c}",dat=data_dir,c=chroms)
+        var_vcfs = expand("{v}/{CHR}.vcf",v=variant_vcf_dir,CHR=chroms),
+        P_ALL = expand("{dat}/PGP1_ALL/augmented_fragmat/{c}",dat=data_dir,c=chroms)
     output:
-        fixed = expand("{{data_dir}}/PGP1_ALL/fragmat/{{x}}/fixed/{c}",c=chroms)
+        fixed = expand("{{data_dir}}/PGP1_ALL/fragmat/{{x}}/{c}",c=chroms)
     run:
-        for i, v, o in zip(input.P_ALL, input.var_vcfs, output.fixed):
-            if wildcards.x == 'cov3':
-                fix_chamber_contamination(i,v,o,threshold=2, min_coverage=3)
-            elif wildcards.x == 'cov2':
-                fix_chamber_contamination(i,v,o,threshold=2, min_coverage=2)
-            else:
-                fix_chamber_contamination(i,v,o,threshold=2, min_coverage=0)
+        mincov = 0
+        if 'cov2' in wildcards.x:
+            mincov = 2
+        elif 'cov3' in wildcards.x:
+            mincov = 3
 
+        if 'none' in wildcards.x:
+            mode = 'none'
+        elif 'basic' in wildcards.x:
+            mode = 'basic'
+        elif 'strict' in wildcards.x:
+            mode = 'strict'
+
+        for i,v,o in zip(input.P_ALL, input.var_vcfs, output.fixed):
+            fix_chamber_contamination(i,v,o,threshold=2, min_coverage=mincov,mode=mode)
 
 # COMBINE FRAGMENT MATRICES
 rule merge_fragmat:
     params:
         job_name  = "merge_fragmat",
     input:
-        P21      = expand("{dat}/PGP1_21/augmented_fragmat/cov1/normal/{c}",dat=data_dir,c=chroms),
-        P22      = expand("{dat}/PGP1_22/augmented_fragmat/cov1/normal/{c}",dat=data_dir,c=chroms),
-        PA1      = expand("{dat}/PGP1_A1/augmented_fragmat/cov1/normal/{c}",dat=data_dir,c=chroms),
-        var_vcfs = expand("{dat}/PGP1_VCFs/{CHR}.vcf",dat=data_dir,CHR=chroms)
+        P21      = expand("{dat}/PGP1_21/augmented_fragmat/{c}",dat=data_dir,c=chroms),
+        P22      = expand("{dat}/PGP1_22/augmented_fragmat/{c}",dat=data_dir,c=chroms),
+        PA1      = expand("{dat}/PGP1_A1/augmented_fragmat/{c}",dat=data_dir,c=chroms),
+        var_vcfs = expand("{v}/{CHR}.vcf",v=variant_vcf_dir,CHR=chroms)
     output:
-        P_ALL = expand("{dat}/PGP1_ALL/augmented_fragmat/cov1/normal/{c}",dat=data_dir,c=chroms)
+        P_ALL = expand("{dat}/PGP1_ALL/augmented_fragmat/{c}",dat=data_dir,c=chroms)
     run:
         for i1, i2, i3, o in zip(input.P21, input.P22, input.PA1, output.P_ALL):
             shell('cat {i1} {i2} {i3} > {o}')
-
-# CREATE FRAGMENT MATRIX FILES FOR EXPERIMENT
-'''
-rule create_fragmat:
-    params:
-        job_name  = "{s}.create_fragmat",
-    input:
-        ploidy1_vcfs         = expand("{{data_dir}}/{{s}}/ploidy1/ch{ch}.vcf",ch=chambers),
-        ploidy2_vcfs = expand("{{data_dir}}/{{s}}/ploidy2/ch{ch}.vcf",ch=chambers),
-        beds         = expand("{{data_dir}}/{{s}}/beds/ch{ch}.bed",ch=chambers),
-        var_vcfs     = expand("{{data_dir}}/PGP1_VCFs/{CHR}.vcf",CHR=chroms)
-    output:
-        expand("{{data_dir}}/{{s}}/fragmat/cov1/normal/{c}",c=chroms)
-    run:
-        output_dir = os.path.join(data_dir,wildcards.s,'fragmat','cov1','normal')
-        #if wildcards.x == 'old':
-        create_hapcut_fragment_matrices_freebayes(input.ploidy1_vcfs, input.ploidy2_vcfs, input.beds, chambers_pad, input.var_vcfs, output_dir)
-        #else:
-        #    create_hapcut_fragment_matrices_freebayes(input.ploidy1_vcfs, input.beds, chambers_pad, input.var_vcfs, output_dir)
-'''
 
 # CREATE AUGMENTED FRAGMENT MATRIX FILES WITH HETEROZYGOUS CALL LOCATIONS
 # SAME FORMAT AS BEFORE, BUT NOW '2' represents a heterozygous call
@@ -175,12 +218,12 @@ rule create_augmented_fragmat:
         ploidy1_vcfs = expand("{{data_dir}}/{{s}}/ploidy1/ch{ch}.vcf",ch=chambers),
         ploidy2_vcfs = expand("{{data_dir}}/{{s}}/ploidy2/ch{ch}.vcf",ch=chambers),
         beds         = expand("{{data_dir}}/{{s}}/beds/ch{ch}.bed",ch=chambers),
-        var_vcfs     = expand("{{data_dir}}/PGP1_VCFs/{CHR}.vcf",CHR=chroms)
+        var_vcfs     = expand("{v}/{CHR}.vcf",v=variant_vcf_dir,CHR=chroms)
     output:
-        expand("{{data_dir}}/{{s}}/augmented_fragmat/cov1/normal/{c}",c=chroms)
+        expand("{{data_dir}}/{{s}}/augmented_fragmat/{c}",c=chroms)
     run:
         output_dir = os.path.join(data_dir,wildcards.s,'augmented_fragmat','cov1','normal')
-        create_hapcut_fragment_matrices_freebayes(input.ploidy1_vcfs, input.ploidy2_vcfs, input.beds, chambers_pad, input.var_vcfs, output_dir, hets_in_seq=True)
+        create_hapcut_fragment_matrices_freebayes(input.ploidy1_vcfs, input.ploidy2_vcfs, input.beds, wildcards.s, chambers_pad, input.var_vcfs, output_dir, hets_in_seq=True)
 
 # simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
 rule simlinks:
@@ -218,6 +261,60 @@ rule simlinks:
             ln -s {config[PGP1_A1_ploidy2]}/PGP1_A1_ch{chpad}.freebayes.ploidy2.allpos.vcf {data_dir}/PGP1_A1/ploidy2/ch{ch}.vcf
             ln -s {config[PGP1_A1_beds]}/PGP1_A1_FragmentBoundaryCh{ch}.bed {data_dir}/PGP1_A1/beds/ch{ch}.bed
             ''')
+
+
+
+# prepare a small 1 Mb region of chr4 from each chamber
+# will serve as a testing ground for base call correction code
+SAMPLE_CHROM = 'chr4'
+SAMPLE_START = int(4e7)
+SAMPLE_END   = int(5e7)
+
+short_chrom_names = set([str(x) for x in range(1,23)]+['X','Y'])
+chrom_names = set(['chr'+str(x) for x in range(1,23)]+['chrX','chrY'])
+
+def format_chrom(chrom_str):
+    if chrom_str in short_chrom_names:
+        chrom_str = 'chr' + chrom_str
+    assert(chrom_str in chrom_names)
+    return chrom_str
+
+rule make_subsample_chamber:
+    params:
+        job_name = 'subsample_{x}_{ch}'
+    input:
+        ploidy1 = 'sissor_project/data/{x}/ploidy1/ch{ch}.vcf'
+    output:
+        ploidy1 = 'sissor_project/test_data/{x}/ploidy1/ch{ch}.vcf'
+    run:
+        with open(input.ploidy1, 'r') as infile, open(output.ploidy1, 'w') as outfile:
+
+            for line in infile:
+                if len(line) < 3 or line[0] == '#':
+                    print(line,file=outfile,end='')
+                    continue
+
+                # read line elements
+                el    = line.strip().split()
+                if len(el) < 3:
+                    print(line,file=outfile,end='')
+                    continue
+
+                chrom = format_chrom(el[0])
+                pos   = int(el[1])-1
+
+                if chrom != SAMPLE_CHROM or pos < SAMPLE_START:
+                    continue
+                if chrom == SAMPLE_CHROM and pos > SAMPLE_END:
+                    break
+
+                print(line,file=outfile,end='')
+
+rule make_subsample:
+    params:
+        job_name = 'make_subsamples'
+    input:
+        expand('sissor_project/test_data/{x}/ploidy1/ch{ch}.vcf',x=cells,ch=chambers)
 
 rule clean:
     shell:

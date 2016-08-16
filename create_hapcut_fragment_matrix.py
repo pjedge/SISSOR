@@ -28,7 +28,7 @@ def format_chrom(chrom_str):
     assert(chrom_str in chrom_names)
     return chrom_str
 
-def create_hapcut_fragment_matrices_freebayes(ploidy1_files, ploidy2_files, bed_files, chamber_names, variant_vcf_files, output_dir,hets_in_seq=False):
+def create_hapcut_fragment_matrices_freebayes(ploidy1_files, ploidy2_files, bed_files, cell_id, chamber_names, variant_vcf_files, output_dir,hets_in_seq=False):
 
     dp_pat = re.compile("DP=(\d+)")
     qr_pat = re.compile(";QR=(\d+)")
@@ -52,9 +52,6 @@ def create_hapcut_fragment_matrices_freebayes(ploidy1_files, ploidy2_files, bed_
                 snp_indices[(chrom,pos)] = ix_counter # given a chromosome and genomic index, return the SNP index within that chroms vcf
                 ix_counter += 1
 
-    # step through triples of a haploid vcf file, the bedfile that defines
-    # where fragment boundaries are, and the pileup file.
-    # pileup file allows us to know which SNPs have acceptable depth/quality
     for ploidy1_file, ploidy2_file, bed_file, chamber_name in zip(ploidy1_files, ploidy2_files, bed_files, chamber_names):
 
         call_dict = dict()
@@ -137,7 +134,7 @@ def create_hapcut_fragment_matrices_freebayes(ploidy1_files, ploidy2_files, bed_
         for i, (chrom, p1, p2) in enumerate(bed_data):
             p1 = int(p1)
             p2 = int(p2)
-            curr_name = '{}:{}-{}:CH{}'.format(chrom,p1,p2,chamber_name)
+            curr_name = '{}:{}-{}:{}:CH{}'.format(chrom,p1,p2,cell_id,chamber_name)
             frag = []
             # consume SNPs leading up to bed region
             # add SNPs inside current bed region to fs
@@ -181,7 +178,6 @@ def create_hapcut_fragment_matrices_freebayes(ploidy1_files, ploidy2_files, bed_
             if hom_seen >= 2:
                 frag_snps.append(frag)
                 #if part_counter == 0:
-                curr_name = '{}:{}:{}'.format(curr_name,hets_seen,snps_spanned)
                 names.append(curr_name)
                 #else:
                 #    part_name = '{}:H{}'.format(curr_name,part_counter)

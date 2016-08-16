@@ -139,7 +139,10 @@ def split_fragment_hets(frag,min_het_count=3,max_het_frac=0.25):
 
     if len(new_piece) >= 2:
         new_fragment_pieces.append(new_piece)
+
     new_piece = []
+    if new_fragment_pieces == []:
+        return []
 
     new_fragment_piece_objects = []
     if split_occured:
@@ -147,7 +150,7 @@ def split_fragment_hets(frag,min_het_count=3,max_het_frac=0.25):
             new_name = '{}:H{}'.format(frag.name,i+1)
             new_fragment_piece_objects.append(fragment.fragment(piece,new_name))
     else:
-        new_fragment_piece_objects.append(frag)
+        new_fragment_piece_objects.append(fragment.fragment(new_fragment_pieces[0],frag.name))
     return new_fragment_piece_objects
 
 def split_flist_hets(flist,min_het_count=3,max_het_frac=0.25):
@@ -384,7 +387,7 @@ def filter_discordant_fragments_SER(flist, SER_threshold):
 #            err   += e
             errs.append(e/t)
 
-        if t_total == 0 or e_total / t_total < SER_threshold: #len(errs) <= 1 or min(errs) < SER_threshold:
+        if t_total <= 10 or e_total / t_total < SER_threshold: #len(errs) <= 1 or min(errs) < SER_threshold:
             new_flist.append(f1)
 
     return new_flist
@@ -421,38 +424,80 @@ def filter_fragment_coverage(flist,coverage):
 
     return filtered_flist
 
-def fix_chamber_contamination_flist(flist, threshold=3, min_coverage=0):
+def add_new_boundaries(flist):
 
-    # FILTER OUT HIGHLY HETEROZYGOUS FRAGMENTS
-    flist = filter_flist_heterozygousity(flist, max_het=0.2)
+    for i in range(len(flist)):
+        flist[i].name = '{}:{}-{}'.format(flist[i].name,flist[i].seq[0][1]+1,flist[i].seq[-1][1]+1)
 
-    # SPLIT FRAGMENTS AT HETEROZYGOUS SPOTS
-    flist = split_flist_hets(flist, min_het_count=3,max_het_frac=0.25)
+        for a in flist[i].seq:
+            assert(a[2] != '2') # one last check that we didn't leave in a heterozygous call
 
-    # SPLIT FRAGMENTS BASED ON FRAGMENT-FRAGMENT COMPARISON
-    flist = fragment_comparison_split(flist,threshold)
+    return flist
 
-    # FILTER OUT FRAGMENTS THAT ARE HIGHLY DISCORDANT
-    #flist = filter_discordant_fragments_SER(flist, 0.3)
+def filter_het_positions(flist):
+
+    filtered_flist = []
+
+    # for each fragment and name
+    for f in flist:
+
+        new_seq = []
+
+        for a in f.seq:
+
+            # if coverage greater than 1
+            if a[2] != '2':
+
+                new_seq.append(a)
+
+        # if the fragment has at least 2 alleles after filtering add it to new list
+        if len(new_seq) >= 2:
+
+            filtered_flist.append(fragment.fragment(new_seq,f.name))
+
+    return filtered_flist
+
+def fix_chamber_contamination(fragmentfile, vcf_file, outfile, threshold=2, min_coverage=0, mode='strict'):
+
+    # READ FRAGMENT MATRIX
+    flist = fragment.read_fragment_matrix(fragmentfile,vcf_file)
+
+    if mode == 'none':
+
+        # SPLIT FRAGMENTS BASED ON FRAGMENT-FRAGMENT COMPARISON
+        flist = filter_het_positions(flist)
+
+    elif mode == 'basic':
+
+        # SPLIT FRAGMENTS BASED ON FRAGMENT-FRAGMENT COMPARISON
+        flist = filter_het_positions(flist)
+        flist = fragment_comparison_split(flist,threshold)
+
+    elif mode == 'strict':
+
+        # FILTER OUT HIGHLY HETEROZYGOUS FRAGMENTS
+        flist = filter_flist_heterozygousity(flist, max_het=0.05)
+
+        # SPLIT FRAGMENTS AT HETEROZYGOUS SPOTS
+        flist = split_flist_hets(flist, min_het_count=3,max_het_frac=0.25)
+
+        # FILTER OUT FRAGMENTS THAT ARE HIGHLY DISCORDANT
+        flist = filter_discordant_fragments_SER(flist, 0.3)
+
+        # SPLIT FRAGMENTS BASED ON FRAGMENT-FRAGMENT COMPARISON
+        flist = fragment_comparison_split(flist,threshold)
+    else:
+        print("INVALID MODE")
+        sys.exit(1)
 
     # FILTER OUT FRAGMENTS BELOW MIN COVERAGE
     if min_coverage > 1:
         flist = filter_fragment_coverage(flist, min_coverage)
 
-    return flist
-
-def fix_chamber_contamination(fragmentfile, vcf_file, outfile, threshold=2, min_coverage=0):
-
-    # READ FRAGMENT MATRIX
-    flist = fragment.read_fragment_matrix(fragmentfile,vcf_file)
-
-    flist = fix_chamber_contamination_flist(flist,threshold,min_coverage)
+    flist = add_new_boundaries(flist)
 
     # WRITE TO FILE
     fragment.write_fragment_matrix(flist, outfile)
-
-    #if DEBUG:
-    #    matrixify_flist(new_flist,new_names, 'sim_data/pretty_fragmatrix_fixed')
 
 if __name__ == '__main__':
     args = parse_args()
