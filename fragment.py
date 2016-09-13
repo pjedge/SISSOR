@@ -9,11 +9,11 @@ Created on Sat Jul  9 16:35:02 2016
 
 
 class fragment:
-    
+
     def __init__(self, seq, name, switch_errors=None, mismatch_errors = None):
         self.seq = seq                         # list of (snp index, genomic index, allele call, quality score) tuples
         self.name = name                       # fragment ID / name
-        self.switch_errors = switch_errors     # list of SNP index positions where switch errors were found 
+        self.switch_errors = switch_errors     # list of SNP index positions where switch errors were found
         self.mismatch_errors = mismatch_errors # list of SNP index positions where mismatch errors occured
 
     def __str__(self):
@@ -39,7 +39,7 @@ class fragment:
         prefix = '{} {}'.format(num_pairs,self.name)
         fragstr = prefix + fragstr
         return fragstr
-        
+
 def read_fragment_matrix(frag_matrix, vcf_file):
 
     snp_ix = 0
@@ -55,7 +55,7 @@ def read_fragment_matrix(frag_matrix, vcf_file):
             genomic_pos = int(el[1])-1
             vcf_dict[snp_ix] = genomic_pos
             snp_ix += 1
-    
+
     flist = []
 
     with open(frag_matrix,"r") as fm:
@@ -104,7 +104,7 @@ def write_fragment_matrix(flist,outfile):
 
     with open(outfile, 'w') as opf:
         for firstpos, line in lines:
-            print(line, file=opf)  
+            print(line, file=opf)
 
 def matrixify_flist(flist, outfile=None):
 
@@ -115,7 +115,7 @@ def matrixify_flist(flist, outfile=None):
 
         if len(f.name) > max_name:
             max_name = len(f.name)
-        
+
         for a in f.seq:
 
             if a[0] > max_ix:
@@ -125,14 +125,14 @@ def matrixify_flist(flist, outfile=None):
     if outfile != None:
         with open(outfile,'w') as o:
             for f in flist:
-    
+
                 line = ['-'] * (max_ix+1)
                 for a in f.seq:
                     line[a[0]] = a[2]
-                
+
                 line = [f.name.ljust(max_name+1)] + line
                 pline = ''.join(line)
-                
+
                 print(pline,file=o)
     else:
         for f in flist:
@@ -140,20 +140,20 @@ def matrixify_flist(flist, outfile=None):
             line = ['-'] * (max_ix+1)
             for a in f.seq:
                 line[a[0]] = a[2]
-            
+
             line = [f.name.ljust(max_name+1)] + line
             pline = ''.join(line)
-            
+
             print(pline)
-            
+
 # compute error rates by using another haplotype block file as ground truth
-def fragment_hapblock_error_rate(truth_file, frag_file, vcf_file, outfile):
-    
+def fragment_hapblock_error_rate(truth_file, frag_file, vcf_file, outfile,chamber_filter=None):
+
     import sys
     sys.path.append("/home/peter/git/HapTools")
     import fileIO
     import error_rates
-    
+
     snp_ix = 0
     vcf_dict = dict()
     with open(vcf_file,'r') as infile:
@@ -175,7 +175,7 @@ def fragment_hapblock_error_rate(truth_file, frag_file, vcf_file, outfile):
         new_seq = [(pos,gpos,call,qual) for (pos,gpos,call,qual) in f.seq if call != '2']
         new_flist.append(fragment(new_seq,f.name))
     flist = new_flist
-    
+
     t_blocklist = fileIO.parse_hapblock_file(truth_file,use_SNP_index=True)
     num_snps    = fileIO.count_SNPs(vcf_file)
     num_covered = sum(error_rates.find_covered_positions(frag_file, num_snps))
@@ -200,7 +200,8 @@ def fragment_hapblock_error_rate(truth_file, frag_file, vcf_file, outfile):
         print("FRAG_ID\tREF_NAME\tSWITCH_CT\tPOSS_SW\tMISMATCH_CT\tPOSS_MM\tSWITCH_LOC\tMISMATCH_LOC",file=OUTFILE)
         for f in flist:
 
-            
+            if chamber_filter != None and ':CH{0:02d}:'.format(chamber_filter) not in f.name:
+                continue
             fragment_as_block = [(snp_ix, allele, flip(allele)) for (snp_ix,g_ix,allele,qual) in f.seq]
 
             err = error_rates.error_rate_calc(t_blocklist, [fragment_as_block], num_snps, num_covered, ref_name, track_error_positions=True)
@@ -210,10 +211,10 @@ def fragment_hapblock_error_rate(truth_file, frag_file, vcf_file, outfile):
             #reslist = [fragment.name,ref_name,err.switch_count, err.poss_sw, err.mismatch_count, err.poss_mm,switchpos,mismatchpos]
             swloc[f.name] = switchpos
             mmloc[f.name] = mismatchpos
-            err_rates[f.name] = (err.switch_count,err.mismatch_count)
+            err_rates[f.name] = err.get_switch_mismatch_rate()
             #err_rates[name] = err.get_switch_rate()
 
             #print("\t".join([str(x) for x in reslist]),file=OUTFILE)
-    
+
     #return err_rates
     return swloc, mmloc,err_rates
