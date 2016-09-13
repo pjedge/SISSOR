@@ -5,8 +5,12 @@ __default__:
     group:           bansal-group
     qsub_stdout_dir: stdout
     job_name:        snakemake_job
-    ppn:             2
-    walltime:        '30:00:00'
+    ppn:             1
+    walltime:        '10:00:00'
+
+run_freebayes:
+    ppn: 2
+    walltime: '30:00:00'
 
 pileups:
     ppn: 4
