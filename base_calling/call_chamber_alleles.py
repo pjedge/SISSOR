@@ -174,6 +174,7 @@ def singlecell_config(het,nonzero_chambers):
     nzs = set(nonzero_chambers)
     
     configs = []
+    done    = set()
     for c1,c2,c3,c4 in itertools.product(nz,nz,nz,nz):
         if set.intersection({c1,c2,c3,c4},nzs) != nzs:
             continue
@@ -183,6 +184,11 @@ def singlecell_config(het,nonzero_chambers):
         if (not het and sl not in hom_config_probs) or (het and sl not in het_config_probs):
             raise Exception('Strand configuration not in config_probs dictionary')
         
+        if sl in done:
+            continue
+        
+        done.add(sl)
+            
         if het:
             prob = het_config_probs[sl]
         else:
