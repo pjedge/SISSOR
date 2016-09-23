@@ -108,17 +108,7 @@ class test_subtractlogs(unittest.TestCase):
         
     def test5(self):
         self.f(1,0.5)
-        
-class test_remove_substrings(unittest.TestCase):    
-    
-    def test1(self):
-        cur_string, replace_list
-        self.f(0.001,0.000001)
-        
-        
-    def test2(self):
-        self.f(0.001,1e-10)
-        
+                
 if __name__ == '__main__':
 
     # this try/catch block allows test suite to be run in spyder IDE interpreter

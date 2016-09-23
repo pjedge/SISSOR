@@ -12,8 +12,11 @@ from pdb import set_trace
 if False:
     set_trace() # to dodge warnings that pdb isn't being used.
 from copy import deepcopy
+from collections import defaultdict
+import time
+import pickle
 #import sys
-
+from matplotlib import pyplot as plt
 desc = 'Use cross-chamber information to call chamber alleles in SISSOR data'
 
 default_input_dir = 'pileups_subsample'
@@ -69,7 +72,45 @@ mixed_alleles = list(set([tuple(sorted(list(set(x)))) for x in itertools.product
 
 # PROBABILITY OF SEEING PARENT 1 ALLELE IN MIXED ALLELE CHAMBER
 
-P_parent1_lst = [(0.001,log10(0.495)),(0.5,log10(0.01)),(0.999,log10(0.495))]
+#P_parent1_lst = [(0.001,log10(0.495)),(0.5,log10(0.01)),(0.999,log10(0.495))]
+cov_frac_dist_raw = pickle.load(open( "parameters/cov_frac_dist.p", "rb"))
+cov_frac_dist = defaultdict(list)
+
+lim = 30
+for i in range(1,lim+1):
+    cov_frac_dist[i] = cov_frac_dist_raw[i]
+
+def chunks(l, n): # credit to http://stackoverflow.com/questions/312443/how-do-you-split-a-list-into-evenly-sized-chunks
+    """Yield successive n-sized chunks from l."""
+    for i in range(0, len(l), n):
+        yield l[i:i + n]
+
+# given a list with length N*binsize, sum consectutive binsize-sized chunks into a length N list
+def condense(l, binsize):
+    return [sum(x) for x in chunks(l,binsize)]
+    
+
+last_lst = []
+for i in range(lim,2000,lim):
+    binsize = int(i / lim)
+    lst = condense(cov_frac_dist_raw[i], binsize)
+    if lst == []:
+        lst = last_lst
+    for j in range(i,i+lim):
+        cov_frac_dist[j] = lst
+    last_lst = lst
+
+for i in range(lim,2000):
+    assert(len(cov_frac_dist[i]) == lim)
+    
+    
+for i in range(1,200,10):
+    plt.figure()
+    y = cov_frac_dist[i]
+    x = list(range(len(cov_frac_dist[i])))
+    plt.plot(x,y)
+    plt.title(str(i))
+    
 ###############################################################################
 # HELPER FUNCTIONS
 ###############################################################################
@@ -278,9 +319,9 @@ def pr_one_chamber_data(alleles_present, base_data, qual_data):
 
         a1 = alleles[0]
         a2 = alleles[1]
-        
-        for frac, p0 in P_parent1_lst:
-            
+        cov = len(base_data)
+        for i, p0 in enumerate(cov_frac_dist[cov]):
+            frac = i / len(cov_frac_dist[cov]) if i > 1 else 1e-10
             for base,qual in zip(base_data, qual_data):
                 
                 x1 = addlogs(subtractlogs(0,qual)+subtractlogs(0,omega), qual+omega)
@@ -602,6 +643,12 @@ def call_chamber_alleles(input_dir, output, region):
     for handle in input_files:
         handle.close()
         
+
 if __name__ == '__main__':
+    t1 = time.time()
     args = parseargs()
     call_chamber_alleles(args.input_dir, args.output, args.region)
+    t2 = time.time()
+    
+    print("TOTAL TIME: {} s".format(int(t2-t1)))
+        
