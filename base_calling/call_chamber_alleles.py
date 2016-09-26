@@ -12,8 +12,11 @@ from pdb import set_trace
 if False:
     set_trace() # to dodge warnings that pdb isn't being used.
 from copy import deepcopy
+from collections import defaultdict
+import time
+import pickle
 #import sys
-
+from matplotlib import pyplot as plt
 desc = 'Use cross-chamber information to call chamber alleles in SISSOR data'
 
 default_input_dir = 'pileups_subsample'
@@ -39,38 +42,6 @@ def parseargs():
     return args
 
 ###############################################################################
-# CONSTANTS
-###############################################################################
-
-chroms = ['chr{}'.format(i) for i in range(1,23)] + ['chrX','chrY']
-cells = ['PGP1_21','PGP1_22','PGP1_A1']
-n_chambers = 24
-chambers = list(range(1,n_chambers+1))
-bases = ['A','T','G','C']
-genotypes = list(itertools.combinations_with_replacement(bases,2))
-
-short_chrom_names = set([str(x) for x in range(1,23)]+['X','Y'])
-chrom_names = set(['chr'+str(x) for x in range(1,23)]+['chrX','chrY'])    
-    
-###############################################################################
-# TEMPORARILY HARDCODED (need to be estimated form data in final version)
-###############################################################################
-
-p_null = 0.5          # probability that strand is not sampled in chamber. hardcoded until we can estimate it
-omega = -6.0 # probability of MDA error
-ch_priors = [log10((1-p_null)/n_chambers)]*n_chambers + [log10(p_null)]   # prior probability of sampling a given chamber
-
-genotype_priors = dict()
-for g in genotypes:
-    genotype_priors[g] = log10(1/16)
-n_cells = 3
-alleles = ['A','T','G','C']
-mixed_alleles = list(set([tuple(sorted(list(set(x)))) for x in itertools.product(alleles,alleles)]))
-
-# PROBABILITY OF SEEING PARENT 1 ALLELE IN MIXED ALLELE CHAMBER
-
-P_parent1_lst = [(0.001,log10(0.495)),(0.5,log10(0.01)),(0.999,log10(0.495))]
-###############################################################################
 # HELPER FUNCTIONS
 ###############################################################################
 
@@ -83,6 +54,9 @@ def safenext(iterator):
     except StopIteration:
         return 0
 
+short_chrom_names = set([str(x) for x in range(1,23)]+['X','Y'])
+chrom_names = set(['chr'+str(x) for x in range(1,23)]+['chrX','chrY'])   
+        
 def format_chrom(chrom_str):
     if chrom_str in short_chrom_names:
         chrom_str = 'chr' + chrom_str
@@ -111,6 +85,113 @@ def remove_multiple_strings(cur_string, replace_list):  # credit to http://stack
   for cur_word in replace_list:
     cur_string = cur_string.replace(cur_word, '')
   return cur_string
+    
+###############################################################################
+# CONSTANTS
+###############################################################################
+
+chroms = ['chr{}'.format(i) for i in range(1,23)] + ['chrX','chrY']
+cells = ['PGP1_21','PGP1_22','PGP1_A1']
+n_chambers = 24
+chambers = list(range(1,n_chambers+1))
+bases = ['A','T','G','C']
+genotypes = list(itertools.combinations_with_replacement(bases,2))
+    
+###############################################################################
+# TEMPORARILY HARDCODED (need to be estimated form data in final version)
+###############################################################################
+
+p_null = 0.5          # probability that strand is not sampled in chamber. hardcoded until we can estimate it
+omega = pickle.load(open("parameters/MDA_error_rate.p", "rb"))
+ # probability of MDA error
+ch_priors = [log10((1-p_null)/n_chambers)]*n_chambers + [log10(p_null)]   # prior probability of sampling a given chamber
+het_snp_rate = 0.0005
+hom_snp_rate = 0.001
+
+n_cells = 3
+alleles = ['A','T','G','C']
+#allele_percents = [27.25,18.90,18.91,27.29]  # percentages of bases from hg19, http://seqanswers.com/forums/archive/index.php/t-12359.html
+#allele_priors   = [log10(a/sum(allele_percents)) for a in allele_percents]
+mixed_alleles = list(set([tuple(sorted(list(set(x)))) for x in itertools.product(alleles,alleles)]))
+#azip = list(zip(alleles, allele_priors))
+transition = {'A':'G','G':'A','T':'C','C':'T'}
+
+# estimate prior probability of genotypes using strategy described here:
+# http://www.ncbi.nlm.nih.gov/pmc/articles/PMC2694485/
+# "prior probability of each genotype"
+
+genotype_priors = dict()
+for allele in alleles:
+    
+    # priors on haploid alleles
+    p_a = dict()
+    p_a[allele] = 1 - hom_snp_rate
+    p_a[transition[allele]] = hom_snp_rate / 6 * 4
+    for transversion in alleles:
+        if transversion in p_a:
+            continue
+        p_a[transversion] =  hom_snp_rate / 6
+    
+    genotype_priors[allele] = dict()
+    for G in genotypes:
+        g1,g2 = G
+        # probability of homozygous reference is the probability of neither het or hom SNP
+        if g1 == g2 and g1 == allele:
+            genotype_priors[allele][G] = 1.0 - het_snp_rate - hom_snp_rate
+        elif g1 == g2 and g1 != allele:
+            # transitions are 4 times as likely as transversions
+            if g1 == transition[allele]:
+                genotype_priors[allele][G] = het_snp_rate / 6 * 4 
+            else:
+                genotype_priors[allele][G] = het_snp_rate / 6
+        else: # else it's the product of the haploid priors
+                genotype_priors[allele][G] = p_a[g1] * p_a[g2]
+
+    # convert to log
+    for G in genotype_priors[allele].keys():
+        genotype_priors[allele][G] = log10(genotype_priors[allele][G])
+
+
+# PROBABILITY OF SEEING PARENT 1 ALLELE IN MIXED ALLELE CHAMBER
+
+#P_parent1_lst = [(0.001,log10(0.495)),(0.5,log10(0.01)),(0.999,log10(0.495))]
+cov_frac_dist_raw = pickle.load(open( "parameters/cov_frac_dist.p", "rb"))
+cov_frac_dist = defaultdict(list)
+
+lim = 30
+for i in range(1,lim+1):
+    cov_frac_dist[i] = cov_frac_dist_raw[i]
+
+def chunks(l, n): # credit to http://stackoverflow.com/questions/312443/how-do-you-split-a-list-into-evenly-sized-chunks
+    """Yield successive n-sized chunks from l."""
+    for i in range(0, len(l), n):
+        yield l[i:i + n]
+
+# given a list with length N*binsize, sum consectutive binsize-sized chunks into a length N list
+def condense(l, binsize):
+    return [sum(x) for x in chunks(l,binsize)]
+    
+
+last_lst = []
+for i in range(lim,2000,lim):
+    binsize = int(i / lim)
+    lst = condense(cov_frac_dist_raw[i], binsize)
+    if lst == []:
+        lst = last_lst
+    for j in range(i,i+lim):
+        cov_frac_dist[j] = lst
+    last_lst = lst
+
+for i in range(lim,2000):
+    assert(len(cov_frac_dist[i]) == lim)
+    
+    
+for i in range(1,200,10):
+    plt.figure()
+    y = cov_frac_dist[i]
+    x = list(range(len(cov_frac_dist[i])))
+    plt.plot(x,y)
+    plt.title(str(i))
         
 ###############################################################################
 # STRAND-TO-CHAMBER CONFIGURATIONS
@@ -230,38 +311,42 @@ def multicell_config(het,nonzero_chambers):
 # and y is the allele mixture as an alphabetically sorted tuple
 def compute_mixed_allele_priors():
 
-    mixed_allele_priors = {1:dict(),2:dict(),3:dict(),4:dict()}
+    mixed_allele_priors = dict()
     
-    for i in range(1,5):
-        for allele in mixed_alleles:
-            mixed_allele_priors[i][allele] = -1e100
-        for G in genotypes:
-            nz = list(range(i))
-            het = (G[0] != G[1])
-            cfgs = singlecell_config(het,nz)
-    
-            for (c1,c2,c3,c4), p in cfgs:
-                # probability of configuration
-                p += genotype_priors[G] - log10(len({c1,c2,c3,c4}))
-    
-                for j in {c1,c2,c3,c4}:
-    
-                    alleles_present = []
-                    if c1 == j:
-                        alleles_present.append(G[0])
-                    if c2 == j:
-                        alleles_present.append(G[0])
-                    if c3 == j:
-                        alleles_present.append(G[1])
-                    if c4 == j:
-                        alleles_present.append(G[1])
-    
-                    alleles_present = tuple(sorted(list(set(alleles_present))))
-                    
-                    if alleles_present not in mixed_allele_priors[i]:
-                        mixed_allele_priors[i][alleles_present] = p
-                    else:
-                        mixed_allele_priors[i][alleles_present] = addlogs(mixed_allele_priors[i][alleles_present], p)
+    for ref_allele in alleles:
+        
+        mixed_allele_priors[ref_allele] = {1:dict(),2:dict(),3:dict(),4:dict()}
+
+        for i in range(1,5):
+            for allele in mixed_alleles:
+                mixed_allele_priors[ref_allele][i][allele] = -1e100
+            for G in genotypes:
+                nz = list(range(i))
+                het = (G[0] != G[1])
+                cfgs = singlecell_config(het,nz)
+        
+                for (c1,c2,c3,c4), p in cfgs:
+                    # probability of configuration
+                    p += genotype_priors[ref_allele][G] - log10(len({c1,c2,c3,c4}))
+        
+                    for j in {c1,c2,c3,c4}:
+        
+                        alleles_present = []
+                        if c1 == j:
+                            alleles_present.append(G[0])
+                        if c2 == j:
+                            alleles_present.append(G[0])
+                        if c3 == j:
+                            alleles_present.append(G[1])
+                        if c4 == j:
+                            alleles_present.append(G[1])
+        
+                        alleles_present = tuple(sorted(list(set(alleles_present))))
+                        
+                        if alleles_present not in mixed_allele_priors[ref_allele][i]:
+                            mixed_allele_priors[ref_allele][i][alleles_present] = p
+                        else:
+                            mixed_allele_priors[ref_allele][i][alleles_present] = addlogs(mixed_allele_priors[ref_allele][i][alleles_present], p)
                 
     return mixed_allele_priors
 
@@ -284,9 +369,9 @@ def pr_one_chamber_data(alleles_present, base_data, qual_data):
 
         a1 = alleles[0]
         a2 = alleles[1]
-        
-        for frac, p0 in P_parent1_lst:
-            
+        cov = len(base_data)
+        for i, p0 in enumerate(cov_frac_dist[cov]):
+            frac = i / len(cov_frac_dist[cov]) if i > 1 else 1e-10
             for base,qual in zip(base_data, qual_data):
                 
                 x1 = addlogs(subtractlogs(0,qual)+subtractlogs(0,omega), qual+omega)
@@ -304,7 +389,7 @@ def pr_one_chamber_data(alleles_present, base_data, qual_data):
             
     return p
 
-def precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers, mixed_allele_priors):
+def precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers):
     
     pr_one_ch = dict()
     
@@ -323,7 +408,7 @@ def precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers, mixed_alle
 # qual_data: list length 24, containing 1 list per chamber. inner list has q values (p(base call error)) callin in chamber.
 # configs:   list of configurations and their probabilities, see earlier
 
-def pr_all_chamber_data(allele, cell, chamber, pr_one_ch, nonzero_chambers, hom_het_configs):
+def pr_all_chamber_data(allele, ref_allele, cell, chamber, pr_one_ch, nonzero_chambers, hom_het_configs):
     
     p_total = None
     p_total = -1e50
@@ -380,7 +465,7 @@ def pr_all_chamber_data(allele, cell, chamber, pr_one_ch, nonzero_chambers, hom_
     return p_total
 
 # probability that allele is present in chamber
-def pr_allele(cell, chamber, pr_one_ch, nonzero_chambers, mixed_allele_priors):
+def pr_allele(cell, chamber, pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele):
     
     res = []
     probs = []
@@ -390,7 +475,7 @@ def pr_allele(cell, chamber, pr_one_ch, nonzero_chambers, mixed_allele_priors):
     
     for allele in mixed_alleles:
         
-        probs.append(pr_all_chamber_data(allele, cell, chamber, pr_one_ch, nonzero_chambers, hom_het_configs) + mixed_allele_priors[num_nonzero][allele])
+        probs.append(pr_all_chamber_data(allele, ref_allele, cell, chamber, pr_one_ch, nonzero_chambers, hom_het_configs) + mixed_allele_priors[ref_allele][num_nonzero][allele])
     
     # denominator for bayes rule posterior calculation
     total = None
@@ -528,7 +613,8 @@ def call_chamber_alleles(input_dir, output, region):
             nonzero_chambers_flatix = []
             base_data = [[[] for i in range(n_chambers)] for j in range(n_cells)]
             qual_data = [[[] for i in range(n_chambers)] for j in range(n_cells)]
-                         
+            ref_base = None
+            
             for i in np.where(on_chrom_pos)[0]:
                 
                 cell_num = int(i / n_chambers)
@@ -540,8 +626,10 @@ def call_chamber_alleles(input_dir, output, region):
                 
                 if int(el[3]) < coverage_cut:
                     continue
-
-                ref_base = str.upper(el[2])
+                if ref_base == None:
+                    ref_base = str.upper(el[2])
+                else:
+                    assert(ref_base == str.upper(el[2]))
                 if ref_base == 'N':
                     continue
                 
@@ -576,12 +664,12 @@ def call_chamber_alleles(input_dir, output, region):
                
             if nonzero_chambers_flatix != [] and not too_many_chambers:
                 
-                pr_one_ch = precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers, mixed_allele_priors)
+                pr_one_ch = precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers)
                 
                 for cell in range(0,n_cells):  # for each cell
                     for chamber in nonzero_chambers[cell]:
                         
-                        res = pr_allele(cell, chamber, pr_one_ch, nonzero_chambers, mixed_allele_priors)
+                        res = pr_allele(cell, chamber, pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_base)
                         
                         out_str = ';'.join(['{}:{}'.format(''.join(a),p) for a,p in res])
                         
@@ -608,6 +696,12 @@ def call_chamber_alleles(input_dir, output, region):
     for handle in input_files:
         handle.close()
         
+
 if __name__ == '__main__':
+    t1 = time.time()
     args = parseargs()
     call_chamber_alleles(args.input_dir, args.output, args.region)
+    t2 = time.time()
+    
+    print("TOTAL TIME: {} s".format(int(t2-t1)))
+        
