@@ -22,6 +22,7 @@ import re
 from pdb import set_trace
 from collections import defaultdict
 import random
+import math
 import bisect
 if False:
     set_trace() # to dodge warnings that pdb isn't being used.
@@ -50,6 +51,7 @@ def parseargs():
 # CONSTANTS
 ###############################################################################
 
+sample_rate = 0.001
 chroms = ['chr{}'.format(i) for i in range(1,23)] + ['chrX','chrY']
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 n_chambers = 24
@@ -65,7 +67,6 @@ chrom_names = set(['chr'+str(x) for x in range(1,23)]+['chrX','chrY'])
 ###############################################################################
 
 p_null = 0.5          # probability that strand is not sampled in chamber. hardcoded until we can estimate it
-omega = -6.0 # probability of MDA error
 ch_priors = [log10((1-p_null)/n_chambers)]*n_chambers + [log10(p_null)]   # prior probability of sampling a given chamber
 
 genotype_priors = dict()
@@ -183,8 +184,11 @@ def estimate_parameters(input_dir, output_dir):
 
     chrX_covs = defaultdict(int)
     
-    MDA_sum   = -1e100
-    MDA_total = 0
+    #MDA_sum   = -1e100
+    #MDA_total = 0
+    chamber_position_counts = defaultdict(int)
+    strand_coverage_counts = defaultdict(int)
+    total_sampled_cell_positions = 0
     
     # until all files have reached stopiteration
     while sum([not l for l in lines]) < N:
@@ -237,98 +241,127 @@ def estimate_parameters(input_dir, output_dir):
         # do something with line element that is on the current genomic index
         
         if chrom == 'chrX':
-            # iterate to the next lines for each line on the current index        
+                                    
+            nonzero_chambers = [[] for i in range(n_cells)]
+            nonzero_chambers_flatix = []
+            base_data = [[[] for i in range(n_chambers)] for j in range(n_cells)]
+            qual_data = [[[] for i in range(n_chambers)] for j in range(n_cells)]
+                         
             for i in np.where(on_chrom_pos)[0]:
-                lines[i] = safenext(input_files[i])
                 
-            continue
-                                
-        nonzero_chambers = [[] for i in range(n_cells)]
-        nonzero_chambers_flatix = []
-        base_data = [[[] for i in range(n_chambers)] for j in range(n_cells)]
-        qual_data = [[[] for i in range(n_chambers)] for j in range(n_cells)]
-                     
-        for i in np.where(on_chrom_pos)[0]:
-            
-            cell_num = int(i / n_chambers)
-            ch_num   = i % 24
-            
-            el = el_lst[i]
-            if not el:
-                continue
-            
-            if int(el[3]) < coverage_cut:
-                continue
-
-            ref_base = str.upper(el[2])
-            if ref_base == 'N':
-                continue
-            
-            assert(ref_base in bases)
-            
-            nonzero_chambers_flatix.append(i)
-            nonzero_chambers[cell_num].append(ch_num)        
+                cell_num = int(i / n_chambers)
+                ch_num   = i % 24
+                
+                el = el_lst[i]
+                if not el:
+                    continue
+                
+                if int(el[3]) < coverage_cut:
+                    continue
     
-            bd = str.upper(re.sub(r'\^.|\$', '', el[4]))
-            
-            bd = re.sub(r'\.|\,', ref_base, bd)
-            qd = [((ord(q) - 33) * -0.1) for q in el[5]]
-
-            bd, qd = zip(*[(b,q) for b,q in zip(bd,qd) if b not in ['>','<','*']])
-
-            
-            assert(len(bd) == len(qd))
-
-            
-            base_data[cell_num][ch_num] = bd
-            qual_data[cell_num][ch_num] = qd
-                    
-        too_many_chambers = False
-        
-        for nz in nonzero_chambers:
-            if len(nz) > 2:
-                too_many_chambers = True
-                break
-          
-        if nonzero_chambers_flatix != [] and not too_many_chambers:
-                            
-            for cell in range(0,n_cells):  # for each cell
+                ref_base = str.upper(el[2])
+                if ref_base == 'N':
+                    continue
                 
-                # for strand mixture estimate                
-                for chamber in nonzero_chambers[cell]:
-
-                    d = len(base_data[cell][chamber])
-                    chrX_covs[d] += 1
+                assert(ref_base in bases)
                 
-                # MDA error estimate
-                if len(nonzero_chambers[cell]) == 2:
-
-                    base_counts = defaultdict(int)
-                    for chamber in nonzero_chambers[cell]:
-                        
-                        for b in base_data[cell][chamber]:
-                            
-                            base_counts[b] += 1
-                    
-                    max_ct = -1
-                    majority_base = None
-                    for k, v in base_counts.items():
-                        
-                        if v > max_ct:
-                            majority_base = k
-                    
-                    for chamber in nonzero_chambers[cell]:
-                        
-                        for b,q in zip(base_data[cell][chamber], qual_data[cell][chamber]):
-
-                            if b == majority_base:
-                                MDA_sum = addlogs(MDA_sum, q)
-                            else:
-                                MDA_sum = addlogs(MDA_sum, subtractlogs(0, q))
-                            
-                        MDA_total += len(base_data[cell][chamber])
-
+                nonzero_chambers_flatix.append(i)
+                nonzero_chambers[cell_num].append(ch_num)        
         
+                bd = str.upper(re.sub(r'\^.|\$', '', el[4]))
+                
+                bd = re.sub(r'\.|\,', ref_base, bd)
+                qd = [((ord(q) - 33) * -0.1) for q in el[5]]
+    
+                bd, qd = zip(*[(b,q) for b,q in zip(bd,qd) if b not in ['>','<','*']])
+    
+                
+                assert(len(bd) == len(qd))
+    
+                
+                base_data[cell_num][ch_num] = bd
+                qual_data[cell_num][ch_num] = qd
+                        
+            too_many_chambers = False
+            
+            for nz in nonzero_chambers:
+                if len(nz) > 2:
+                    too_many_chambers = True
+                    break
+              
+            if nonzero_chambers_flatix != [] and not too_many_chambers:
+                                
+                for cell in range(0,n_cells):  # for each cell
+                    
+                    # for strand mixture estimate                
+                    for chamber in nonzero_chambers[cell]:
+    
+                        d = len(base_data[cell][chamber])
+                        chrX_covs[d] += 1
+                    
+                    '''
+                    # MDA error estimate
+                    if len(nonzero_chambers[cell]) == 2:
+    
+                        base_counts = defaultdict(int)
+                        total_bases = 0
+                        for chamber in nonzero_chambers[cell]:
+                            
+                            for b in base_data[cell][chamber]:
+                                
+                                base_counts[b] += 1
+                                total_bases += 1
+                                
+                        if total_bases < 10:
+                            continue
+                        
+                        max_ct = -1
+                        majority_base = None
+                        for k, v in base_counts.items():
+                            
+                            if v > max_ct:
+                                majority_base = k
+                        
+                        for chamber in nonzero_chambers[cell]:
+                            
+                            for b,q in zip(base_data[cell][chamber], qual_data[cell][chamber]):
+    
+                                if b == majority_base:
+                                    MDA_sum = addlogs(MDA_sum, q)
+                                else:
+                                    MDA_sum = addlogs(MDA_sum, subtractlogs(0, q))
+                                
+                            MDA_total += len(base_data[cell][chamber]) 
+                    '''
+                
+        elif random.random() < sample_rate and chrom != 'chrX' and chrom != 'chrY':
+                
+            total_sampled_cell_positions += n_cells
+            strand_counts = defaultdict(int)         
+            for i in np.where(on_chrom_pos)[0]:
+                
+                cell_num = int(i / n_chambers)
+                ch_num   = i % 24
+                
+                el = el_lst[i]
+                if not el:
+                    continue
+                
+                if int(el[3]) < coverage_cut:
+                    continue
+                
+                ref_base = str.upper(el[2])
+                if ref_base == 'N':
+                    continue
+                
+                assert(ref_base in bases)
+
+                strand_counts[cell_num] += 1
+                chamber_position_counts[ch_num] += 1
+                
+            for cell_num in range(n_cells):
+                strand_coverage_counts[strand_counts[cell_num]] += 1
+                
         # iterate to the next lines for each line on the current index        
         for i in np.where(on_chrom_pos)[0]:
 
@@ -339,7 +372,6 @@ def estimate_parameters(input_dir, output_dir):
     total = sum([b for a,b in chrX_covs_tuple])
     chrX_covs_probs = [(a,b/total) for a,b in chrX_covs_tuple]
     chrX_covs_func  = weighted_choice_bisect_compile(chrX_covs_probs)
-
     # cov_frac_dist is used in the following way:
     # cov_frac_dist[cov][i] where i=1..cov tells the probability of allele p1 being present in fraction 
     num_samples = 10000000
@@ -360,12 +392,14 @@ def estimate_parameters(input_dir, output_dir):
         assert(len(cov_frac_dist[cov]) == cov)
     
     # estimate rate of MDA error
-    MDA_error_rate = MDA_sum - log10(MDA_total)
+    #MDA_error_rate = MDA_sum - log10(MDA_total)
     
     # WRITE PARAMETERS TO PICKLE FILES
     pickle.dump(cov_frac_dist, open( "{}/cov_frac_dist.p".format(output_dir), "wb" ))
-    pickle.dump(MDA_error_rate, open( "{}/MDA_error_rate.p".format(output_dir), "wb" ))
-    
+    #pickle.dump(MDA_error_rate, open( "{}/MDA_error_rate.p".format(output_dir), "wb" ))
+    pickle.dump(chamber_position_counts, open( "{}/chamber_position_counts.p".format(output_dir), "wb" ))
+    pickle.dump(strand_coverage_counts, open( "{}/strand_coverage_counts.p".format(output_dir), "wb" ))
+    pickle.dump(total_sampled_cell_positions, open( "{}/total_sampled_cell_positions.p".format(output_dir), "wb" ))
     # close all chambers
 
     for handle in input_files:

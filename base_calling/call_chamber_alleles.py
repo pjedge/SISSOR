@@ -14,9 +14,11 @@ if False:
 from copy import deepcopy
 from collections import defaultdict
 import time
+import math
 import pickle
+from scipy.stats import chisquare
 #import sys
-from matplotlib import pyplot as plt
+#from matplotlib import pyplot as plt
 desc = 'Use cross-chamber information to call chamber alleles in SISSOR data'
 
 default_input_dir = 'pileups_subsample'
@@ -96,26 +98,117 @@ n_chambers = 24
 chambers = list(range(1,n_chambers+1))
 bases = ['A','T','G','C']
 genotypes = list(itertools.combinations_with_replacement(bases,2))
-    
-###############################################################################
-# TEMPORARILY HARDCODED (need to be estimated form data in final version)
-###############################################################################
-
-p_null = 0.5          # probability that strand is not sampled in chamber. hardcoded until we can estimate it
-omega = pickle.load(open("parameters/MDA_error_rate.p", "rb"))
- # probability of MDA error
-ch_priors = [log10((1-p_null)/n_chambers)]*n_chambers + [log10(p_null)]   # prior probability of sampling a given chamber
+parameters_dir = 'parameters'
 het_snp_rate = 0.0005
 hom_snp_rate = 0.001
-
 n_cells = 3
 alleles = ['A','T','G','C']
-#allele_percents = [27.25,18.90,18.91,27.29]  # percentages of bases from hg19, http://seqanswers.com/forums/archive/index.php/t-12359.html
-#allele_priors   = [log10(a/sum(allele_percents)) for a in allele_percents]
+
+###############################################################################
+# ESTIMATE VARIOUS PARAMETERS
+###############################################################################
+
+grams_DNA_before_MDA  = 0.25e-12  # 0.25 pg
+grams_DNA_after_MDA = 6e-9        # 6 ng
+GAIN = grams_DNA_after_MDA / grams_DNA_before_MDA
+omega = log10(3.2e-6 / 2 * math.log2(GAIN)) # probability of MDA error.
+# formula from this paper: http://journals.plos.org/plosone/article?id=10.1371/journal.pone.0105585
+
 mixed_alleles = list(set([tuple(sorted(list(set(x)))) for x in itertools.product(alleles,alleles)]))
 #azip = list(zip(alleles, allele_priors))
 transition = {'A':'G','G':'A','T':'C','C':'T'}
 
+total_sampled_cell_positions = pickle.load(open("{}/total_sampled_cell_positions.p".format(parameters_dir), "rb"))
+# estimate proportions of strands in chambers
+chamber_position_counts = pickle.load(open("{}/chamber_position_counts.p".format(parameters_dir), "rb" ))
+total_position_counts = sum([chamber_position_counts[chamber] for chamber in range(0,24)])
+chamber_proportions = [chamber_position_counts[chamber]/total_position_counts for chamber in range(0,24)]
+
+chamber_proportions = [x if x != 0 else 1e-10 for x in chamber_proportions]
+                       
+# estimate p_null, the probability of a strand not being sampled.
+# we'll iterate over many possible values and choose the one that minimizes p-value for chi-square goodness of fit
+strand_coverage_counts = pickle.load(open("{}/strand_coverage_counts.p".format(parameters_dir), "rb" ))
+strand_coverage_proportions = []
+tot = sum(list(strand_coverage_counts.values()))
+for i in range(0,5):
+    strand_coverage_proportions.append(strand_coverage_counts[i] / tot)
+print("STRAND COVERAGE PROPORTIONS")
+print(strand_coverage_proportions)
+p_null = None #0.75
+ch_priors = None #[log10((1-p_null)/24)]*24 + [log10(p_null)]
+
+max_likelihood = -float("Inf")
+
+p_null_samples = 3
+print("EXPECTED PROPORTIONS")
+for i in range(1,p_null_samples):
+    
+    putative_p_null = i/p_null_samples
+    putative_ch_priors = [log10((1-putative_p_null) * x) for x in chamber_proportions] + [log10(putative_p_null)]   # prior probability of sampling a given chamber
+
+    # given these proportions, compute the expected proportions of positions
+    # with a given number of strands present.
+    
+    poss_ch = list(range(0,25)) # the last element is "no chamber"
+    coverage_dict = dict()
+    for j in range(0,5):
+        coverage_dict[j] = -1e10
+    seen_cfgs = set()
+    plist = []
+    for c1,c2,c3,c4 in itertools.product(poss_ch,poss_ch,poss_ch,poss_ch):
+        # because of symmetry we ignore cases where we can flip the strands for the same result
+        # e.g. we ignore cases where strand 1 is in a later chamber than strand 2 and say that
+        # the cases where it is in an earlier chamber are twice as likely. Same for strands 3,4
+        if c1 > c2:
+            temp = c1
+            c1 = c2
+            c2 = temp
+    
+        if c3 > c4:
+            temp = c3
+            c3 = c4
+            c4 = temp  
+    
+        if (c1,c2,c3,c4) in seen_cfgs:
+            continue
+        
+        if c1 < c2 and c3 < c4:
+            perm = log10(4)
+        elif (c1 < c2 and c3 == c4) or (c1 == c2 and c3 < c4):
+            perm = log10(2)
+        elif c1 == c2 and c3 == c4:
+            perm = log10(1)
+        else:
+            continue
+        seen_cfgs.add((c1,c2,c3,c4))
+        strands_present = 4
+        for c in [c1,c2,c3,c4]:
+            if c == 24:
+                strands_present -= 1
+                
+        cfg_prob = perm+putative_ch_priors[c1]+putative_ch_priors[c2]+putative_ch_priors[c3]+putative_ch_priors[c4]
+        coverage_dict[strands_present] = addlogs(coverage_dict[strands_present],cfg_prob) # probability of configuration
+
+    likelihood = 0
+    for j in range(0,5):
+        # the likelihood of the observed data given this value for p_null
+        # is the product of likelihoods of each observed coverage value
+        likelihood += strand_coverage_counts[j] * coverage_dict[j]
+
+
+    expected_proportions = [10**x for x in coverage_dict.values()]
+
+    print("i={} ".format(i),end='')
+    print(expected_proportions,end='')
+    print(likelihood)
+    
+    if likelihood > max_likelihood:
+        max_likelihood = likelihood
+        p_null = putative_p_null
+        ch_priors = putative_ch_priors
+
+print("P(strand not sampled) = {}".format(p_null))
 # estimate prior probability of genotypes using strategy described here:
 # http://www.ncbi.nlm.nih.gov/pmc/articles/PMC2694485/
 # "prior probability of each genotype"
@@ -184,21 +277,21 @@ for i in range(lim,2000,lim):
 
 for i in range(lim,2000):
     assert(len(cov_frac_dist[i]) == lim)
-    
-    
+
 for i in range(1,200,10):
     plt.figure()
     y = cov_frac_dist[i]
     x = list(range(len(cov_frac_dist[i])))
     plt.plot(x,y)
     plt.title(str(i))
+
+assert(False)
         
 ###############################################################################
 # STRAND-TO-CHAMBER CONFIGURATIONS
 ###############################################################################
 
 # helper data structures that pre-compute probabilities of strand configurations
-
 poss_ch = list(range(0,25)) # the last element is "no chamber"
 het_config_probs = dict()
 
@@ -229,7 +322,7 @@ for c1,c2,c3,c4 in itertools.product(poss_ch,poss_ch,poss_ch,poss_ch):
         continue
 
     het_config_probs[(c1,c2,c3,c4)] = perm+ch_priors[c1]+ch_priors[c2]+ch_priors[c3]+ch_priors[c4] # probability of configuration
-    
+                    
 hom_config_probs = dict()
 
 for c1,c2,c3,c4 in itertools.product(poss_ch,poss_ch,poss_ch,poss_ch):
@@ -243,6 +336,7 @@ for c1,c2,c3,c4 in itertools.product(poss_ch,poss_ch,poss_ch,poss_ch):
     
     hom_config_probs[tuple(lst)] = perm+ch_priors[c1]+ch_priors[c2]+ch_priors[c3]+ch_priors[c4] # probability of configuration 
 
+                     
 # INPUT
 # G: a tuple that specifies genotype e.g. ('A','T')
 # nonzero_chambers: a list containing the indices of chambers 0..23 (or 24, unsampled) where strands may be (have read coverage)
@@ -319,7 +413,7 @@ def compute_mixed_allele_priors():
 
         for i in range(1,5):
             for allele in mixed_alleles:
-                mixed_allele_priors[ref_allele][i][allele] = -1e100
+                mixed_allele_priors[ref_allele][i][allele] = -1e10
             for G in genotypes:
                 nz = list(range(i))
                 het = (G[0] != G[1])
@@ -629,7 +723,10 @@ def call_chamber_alleles(input_dir, output, region):
                 if ref_base == None:
                     ref_base = str.upper(el[2])
                 else:
-                    assert(ref_base == str.upper(el[2]))
+                    try:
+                        assert(ref_base == str.upper(el[2]))
+                    except:
+                        set_trace()
                 if ref_base == 'N':
                     continue
                 
