@@ -118,7 +118,6 @@ mixed_alleles = list(set([tuple(sorted(list(set(x)))) for x in itertools.product
 #azip = list(zip(alleles, allele_priors))
 transition = {'A':'G','G':'A','T':'C','C':'T'}
 
-total_sampled_cell_positions = pickle.load(open("{}/total_sampled_cell_positions.p".format(parameters_dir), "rb"))
 # estimate proportions of strands in chambers
 chamber_position_counts = pickle.load(open("{}/chamber_position_counts.p".format(parameters_dir), "rb" ))
 total_position_counts = sum([chamber_position_counts[chamber] for chamber in range(0,24)])
