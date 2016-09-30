@@ -7,7 +7,6 @@ Created on Wed Sep 21 14:51:49 2016
 """
 
 import argparse
-import numpy as np
 import pickle
 import os
 #import sys
@@ -16,7 +15,6 @@ import itertools
 from math import log10
 from functools import reduce
 import operator
-import re
 from pdb import set_trace
 from collections import defaultdict
 import random
@@ -38,7 +36,7 @@ default_output_dir = 'parameters'
 def parseargs():
 
     parser = argparse.ArgumentParser(description=desc)
-    parser.add_argument('-i', '--input_dir', nargs='?', type = str, help='input data dir, format {DIR}/PGP1_*/ch*.pileup', default=default_input_dir)
+    parser.add_argument('-i', '--input_file', nargs='?', type = str, help='input file with 3 cells x 24 chambers pileups', default=default_input_dir)
     parser.add_argument('-o', '--output_dir', nargs='?', type = str, help='file to write output to', default=default_output_dir)
 
     args = parser.parse_args()
@@ -129,155 +127,36 @@ def weighted_choice_bisect_compile(items):
     return choice
     
 ###############################################################################
-# MAIN FUNCTION AND PARSING
+# MAIN FUNCTIONS AND PARSING
 ###############################################################################
-    
-def estimate_parameters(input_dir, output_dir):
 
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    # open all 72 files (3 cells x 24 chambers) into a list of handles
-    # input files will be read and processed in parallel for equivalent indices
-    # output files will contain the same information but will be corrected based on information from other chambers
-    
-    input_files = []
-
-    for cell in cells:
-            
-        for chamber in chambers:
-            
-            infile_name = '{}/{}/ch{}.pileup'.format(input_dir,cell,chamber)
-
-            input_files.append(open(infile_name,'r'))
-        
-    # step over files in parallel
-    chrom = chroms.pop(0)
-    pos = 0
-    
-    lines = []
-    
-    for file in input_files:
-        
-        lines.append(safenext(file))
-    
-        
-    N = len(input_files)
-
-    # print header lines to output files 
-    for ix in range(N):
-        while 1:
-            
-            if lines[ix] and lines[ix][0] == '#':
-                lines[ix] = safenext(input_files[ix])
-            else:
-                break
-                
-    coverage_cut = 2
+def combine_parameters(suffixes):
 
     chrX_covs = defaultdict(int)
-    
-    #MDA_sum   = -1e100
-    #MDA_total = 0
     chamber_position_counts = defaultdict(int)
     strand_coverage_counts = defaultdict(int)
     total_sampled_cell_positions = 0
     
-    # until all files have reached stopiteration
-    while sum([not l for l in lines]) < N:
-
-        # "element list"
-        # el_lst[x] contains a list with the current line elements for file x (unique cell and chamber)
-        el_lst = []
-        for l in lines:
-            if not l:
-                el_lst.append(0)
-            else:
-                el_lst.append(l.strip().split('\t'))
-
-        # fix inconsistent chromosome names
-        for i in range(len(el_lst)):
-            if el_lst[i]:
-                el_lst[i][0] = format_chrom(el_lst[i][0])
-            
-        on_chrom = [el and el[0] == chrom for el in el_lst]
-        on_chrom_pos = [el and el[0] == chrom and int(el[1])-1 == pos for el in el_lst]
-
-        # if there are no more files on our chromosome, we move onto the next chromosome
-        if sum(on_chrom) == 0:
-            if chroms == []:
-                break
-            else:
-                chrom = chroms.pop(0)
-                pos = 0
-                continue
+    for suffix in suffixes:
         
-        # now we know that some subset of the N files are processing our chromosome
-        # if none of the files are on our genomic index we also need to iterate forward
-        # until some are
+        # LOAD PICKLE FILES
+        partial_chrX_covs = pickle.load(open("parameters/split/chrX_covs{}.p".format(suffix), "rb" ))
+        partial_chamber_position_counts = pickle.load(open("parameters/split/chamber_position_counts{}.p".format(suffix), "rb" ))
+        partial_strand_coverage_counts = pickle.load(open("parameters/split/strand_coverage_counts{}.p".format(suffix), "rb" ))
+        partial_total_sampled_cell_positions = pickle.load(open("parameters/split/total_sampled_cell_positions{}.p".format(suffix), "rb" ))
         
-        if sum(on_chrom_pos) == 0:
-            pos = float('Inf')  # positions for each file
-            for el in el_lst:
-                if el and el[0] == chrom and int(el[1])-1 < pos:
-                    pos = int(el[1])-1  # select minimum position index of all currently considered lines
-        
-        on_chrom_pos = [el and el[0] == chrom and int(el[1])-1 == pos for el in el_lst]
-        assert(sum(on_chrom_pos) > 0)
-        
-        # now we have a valid chromosome, being considered by some file handles
-        # we also have a valid position index, of which some file handles are on it.
-        
-        # process each infile with a 1 in on_chrom_pos
-        # then iterate each of those files
+        for k,v in partial_chrX_covs.items():
+            chrX_covs[k] += v
 
-        # do something with line element that is on the current genomic index
-        
-        if chrom == 'chrX':
-      
-            for i in np.where(on_chrom_pos)[0]:
-                
-                cell_num = int(i / n_chambers)
-                ch_num   = i % 24
-                
-                el = el_lst[i]
-                if not el:
-                    continue
+        for k,v in partial_chamber_position_counts.items():
+            chamber_position_counts[k] += v
 
-                d = int(el[3])
-                
-                if d < coverage_cut:
-                    continue
+        for k,v in partial_strand_coverage_counts.items():
+            strand_coverage_counts[k] += v
 
-                chrX_covs[d] += 1
+        total_sampled_cell_positions += partial_total_sampled_cell_positions
 
-        elif chrom != 'chrX' and chrom != 'chrY':  #elif random.random() < sample_rate and chrom != 'chrX' and chrom != 'chrY':
-                
-            total_sampled_cell_positions += n_cells
-            strand_counts = defaultdict(int)         
-            for i in np.where(on_chrom_pos)[0]:
-                
-                cell_num = int(i / n_chambers)
-                ch_num   = i % 24
-                
-                el = el_lst[i]
-                if not el:
-                    continue
-                
-                if int(el[3]) < coverage_cut:
-                    continue
 
-                strand_counts[cell_num] += 1
-                chamber_position_counts[ch_num] += 1
-                
-            for cell_num in range(n_cells):
-                strand_coverage_counts[strand_counts[cell_num]] += 1
-                
-        # iterate to the next lines for each line on the current index        
-        for i in np.where(on_chrom_pos)[0]:
-
-            lines[i] = safenext(input_files[i])
-            
-    
     chrX_covs_tuple = list(chrX_covs.items())
     total = sum([b for a,b in chrX_covs_tuple])
     chrX_covs_probs = [(a,b/total) for a,b in chrX_covs_tuple]
@@ -295,27 +174,72 @@ def estimate_parameters(input_dir, output_dir):
         if cov_frac_dist_counts[tcov] == []:
             cov_frac_dist_counts[tcov] = [0]*tcov
         cov_frac_dist_counts[tcov][cov1] += 1
-
+    
     for cov in cov_frac_dist_counts.keys():
         for i, count in enumerate(cov_frac_dist_counts[cov]):
             cov_frac_dist[cov].append(count/sum(cov_frac_dist_counts[cov]))
         assert(len(cov_frac_dist[cov]) == cov)
-    
-    # estimate rate of MDA error
-    #MDA_error_rate = MDA_sum - log10(MDA_total)
-    
-    # WRITE PARAMETERS TO PICKLE FILES
-    pickle.dump(chrX_covs_probs, open( "{}/chrX_covs_probs.p".format(output_dir), "wb" ))
-    pickle.dump(cov_frac_dist, open( "{}/cov_frac_dist.p".format(output_dir), "wb" ))
-    #pickle.dump(MDA_error_rate, open( "{}/MDA_error_rate.p".format(output_dir), "wb" ))
-    pickle.dump(chamber_position_counts, open( "{}/chamber_position_counts.p".format(output_dir), "wb" ))
-    pickle.dump(strand_coverage_counts, open( "{}/strand_coverage_counts.p".format(output_dir), "wb" ))
-    pickle.dump(total_sampled_cell_positions, open( "{}/total_sampled_cell_positions.p".format(output_dir), "wb" ))
-    # close all chambers
-
-    for handle in input_files:
-        handle.close()
         
+   # WRITE PARAMETERS TO PICKLE FILES
+    pickle.dump(chrX_covs, open("parameters/chrX_covs.p", "wb"))
+    pickle.dump(chamber_position_counts, open("parameters/chamber_position_counts.p","wb"))
+    pickle.dump(strand_coverage_counts, open("parameters/strand_coverage_counts.p","wb"))
+    pickle.dump(total_sampled_cell_positions, open("parameters/total_sampled_cell_positions.p","wb"))
+    pickle.dump(cov_frac_dist, open("parameters/cov_frac_dist.p","wb"))
+
+def estimate_parameters(input_file, suffix=''):
+
+    coverage_cut = 3
+
+    chrX_covs = defaultdict(int)
+    chamber_position_counts = defaultdict(int)
+    strand_coverage_counts = defaultdict(int)
+    total_sampled_cell_positions = 0
+    
+    with open(input_file,'r') as ipf:
+        for line in ipf:
+            
+            el = line.strip().split('\t')
+
+            chrom = el[0]
+            ref_base = str.upper(el[2])
+
+            if ref_base == 'N':
+                continue
+            assert(ref_base in bases)
+                
+            strand_counts = defaultdict(int)             
+
+            for cell_num in range(n_cells):
+                for ch_num in range(n_chambers):
+                
+                    flat_ix = cell_num * n_chambers + ch_num
+                    col_ix = 3 + 4 * flat_ix
+                    depth = int(el[col_ix])                        
+                    if depth < coverage_cut or el[col_ix + 1] == '*':
+                        continue
+                    
+                    if chrom == 'chrX':
+                        chrX_covs[depth] += 1
+                    elif chrom != 'chrY':
+                        strand_counts[cell_num] += 1
+                        chamber_position_counts[ch_num] += 1
+
+            if chrom != 'chrX' and chrom != 'chrY':
+                for cell_num in range(n_cells):
+                    total_sampled_cell_positions += n_cells
+                    strand_coverage_counts[strand_counts[cell_num]] += 1
+
+    output_dir = 'parameters/split'
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # WRITE PARAMETERS TO PICKLE FILES
+    pickle.dump(chrX_covs, open( "parameters/split/chrX_covs{}.p".format(suffix), "wb" ))
+    pickle.dump(chamber_position_counts, open( "parameters/split/chamber_position_counts{}.p".format(suffix), "wb" ))
+    pickle.dump(strand_coverage_counts, open( "parameters/split/strand_coverage_counts{}.p".format(suffix), "wb" ))
+    pickle.dump(total_sampled_cell_positions, open( "parameters/split/total_sampled_cell_positions{}.p".format(suffix), "wb" ))
+
 if __name__ == '__main__':
     args = parseargs()
-    estimate_parameters(args.input_dir, args.output_dir)
+    estimate_parameters(args.input_file, args.output_dir)

@@ -1,5 +1,4 @@
 import argparse
-import numpy as np
 #import os
 #import sys
 #from collections import defaultdict
@@ -16,7 +15,6 @@ from collections import defaultdict
 import time
 import math
 import pickle
-from scipy.stats import chisquare
 #import sys
 #from matplotlib import pyplot as plt
 desc = 'Use cross-chamber information to call chamber alleles in SISSOR data'
@@ -31,9 +29,9 @@ default_output_dir = 'output_calls.txt'
 def parseargs():
 
     parser = argparse.ArgumentParser(description=desc)
-    parser.add_argument('-i', '--input_dir', nargs='?', type = str, help='input data dir, format {DIR}/PGP1_*/ch*.pileup', default=default_input_dir)
-    parser.add_argument('-o', '--output', nargs='?', type = str, help='file to write output to', default=default_output_dir)
-    parser.add_argument('-r', '--region', nargs='?', type = str, help='region to process in format {CHR}:{START}-{END} to process (END excluded)', default=None)
+    parser.add_argument('-i', '--input_file', nargs='?', type = str, help='input file, pileup with 3 cells x 24 chambers', default=default_input_dir)
+    parser.add_argument('-o', '--output_file', nargs='?', type = str, help='file to write output to', default=default_output_dir)
+    #parser.add_argument('-r', '--region', nargs='?', type = str, help='region to process in format {CHR}:{START}-{END} to process (END excluded)', default=None)
 
     # default to help option. credit to unutbu: http://stackoverflow.com/questions/4042452/display-help-message-with-python-argparse-when-script-is-called-without-any-argu
     #if len(sys.argv) <= 1:
@@ -92,6 +90,7 @@ def remove_multiple_strings(cur_string, replace_list):  # credit to http://stack
 # CONSTANTS
 ###############################################################################
 
+coverage_cut = 3
 chroms = ['chr{}'.format(i) for i in range(1,23)] + ['chrX','chrY']
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 n_chambers = 24
@@ -139,8 +138,8 @@ ch_priors = None #[log10((1-p_null)/24)]*24 + [log10(p_null)]
 
 max_likelihood = -float("Inf")
 
-p_null_samples = 3
-print("EXPECTED PROPORTIONS")
+p_null_samples = 1000
+
 for i in range(1,p_null_samples):
     
     putative_p_null = i/p_null_samples
@@ -276,15 +275,14 @@ for i in range(lim,2000,lim):
 
 for i in range(lim,2000):
     assert(len(cov_frac_dist[i]) == lim)
-
+'''
 for i in range(1,200,10):
     plt.figure()
     y = cov_frac_dist[i]
     x = list(range(len(cov_frac_dist[i])))
     plt.plot(x,y)
     plt.title(str(i))
-
-assert(False)
+'''
         
 ###############################################################################
 # STRAND-TO-CHAMBER CONFIGURATIONS
@@ -586,179 +584,64 @@ def pr_allele(cell, chamber, pr_one_ch, nonzero_chambers, mixed_allele_priors, r
 # MAIN FUNCTION AND PARSING
 ###############################################################################
     
-def call_chamber_alleles(input_dir, output, region):
+def call_chamber_alleles(input_file, output_file):
     
-    if region != None:
-        region_chrom, bounds = region.split(':')
-        region_start, region_end = bounds.split('-')
-        region_start = int(region_start)
-        region_end = int(region_end)
-
     mixed_allele_priors = compute_mixed_allele_priors()
-    # open all 72 files (3 cells x 24 chambers) into a list of handles
-    # input files will be read and processed in parallel for equivalent indices
-    # output files will contain the same information but will be corrected based on information from other chambers
-    
-    input_files = []
-
-    for cell in cells:
-            
-        for chamber in chambers:
-            
-            infile_name = '{}/{}/ch{}.pileup'.format(input_dir,cell,chamber)
-
-            input_files.append(open(infile_name,'r'))
         
-    # step over files in parallel
-    chrom = chroms.pop(0)
-    pos = 0
-    
-    lines = []
-    
-    for file in input_files:
-        
-        lines.append(safenext(file))
-    
-        
-    N = len(input_files)
+    with open(input_file,'r') as ipf, open(output_file,'w') as opf:
+        for line in ipf:
+            
+            el = line.strip().split('\t')
 
-    # print header lines to output files 
-    for ix in range(N):
-        while 1:
-            
-            if lines[ix] and lines[ix][0] == '#':
-                lines[ix] = safenext(input_files[ix])
-            else:
-                break
-            
-    seen_region_chrom = False
-    
-    coverage_cut = 3
-    PROCESSED = 0
-    # until all files have reached stopiteration
-    with open(output,'w') as opf:
-        while sum([not l for l in lines]) < N:
-
-            # "element list"
-            # el_lst[x] contains a list with the current line elements for file x (unique cell and chamber)
-            el_lst = []
-            for l in lines:
-                if not l:
-                    el_lst.append(0)
-                else:
-                    el_lst.append(l.strip().split('\t'))
-    
-            # fix inconsistent chromosome names
-            for i in range(len(el_lst)):
-                if el_lst[i]:
-                    el_lst[i][0] = format_chrom(el_lst[i][0])
-                
-            on_chrom = [el and el[0] == chrom for el in el_lst]
-            on_chrom_pos = [el and el[0] == chrom and int(el[1])-1 == pos for el in el_lst]
-    
-            # if there are no more files on our chromosome, we move onto the next chromosome
-            if sum(on_chrom) == 0:
-                if chroms == []:
-                    break
-                else:
-                    chrom = chroms.pop(0)
-                    pos = 0
-                    continue
-            
-            # now we know that some subset of the N files are processing our chromosome
-            # if none of the files are on our genomic index we also need to iterate forward
-            # until some are
-            
-            if sum(on_chrom_pos) == 0:
-                pos = float('Inf')  # positions for each file
-                for el in el_lst:
-                    if el and el[0] == chrom and int(el[1])-1 < pos:
-                        pos = int(el[1])-1  # select minimum position index of all currently considered lines
-            
-            on_chrom_pos = [el and el[0] == chrom and int(el[1])-1 == pos for el in el_lst]
-            assert(sum(on_chrom_pos) > 0)
-            
-            # now we have a valid chromosome, being considered by some file handles
-            # we also have a valid position index, of which some file handles are on it.
-            
-            # process each infile with a 1 in on_chrom_pos
-            # then iterate each of those files
-    
-            # do something with line element that is on the current genomic index
-            if region != None:
-                if chrom == region_chrom:
-                    seen_region_chrom = True
-                if (seen_region_chrom and chrom != region_chrom) or (chrom == region_chrom and pos >= region_end): # past region, we're done
-                    for handle in input_files:
-                        handle.close()
-                    return
-                    
-                elif chrom != region_chrom or pos < region_start: # before region, skip ahead
-                    # iterate to the next lines for each line on the current index        
-                    for i in np.where(on_chrom_pos)[0]:
-            
-                        lines[i] = safenext(input_files[i])
-                    continue
-                                    
-            print("PROCESSED {}".format(PROCESSED))
             tags = []
-            nonzero_chambers = [[] for i in range(n_cells)]
-            nonzero_chambers_flatix = []
+            nonzero_chambers = [[] for i in range(n_cells)]  
+            nonzero_chamber_count = 0
             base_data = [[[] for i in range(n_chambers)] for j in range(n_cells)]
             qual_data = [[[] for i in range(n_chambers)] for j in range(n_cells)]
-            ref_base = None
             
-            for i in np.where(on_chrom_pos)[0]:
-                
-                cell_num = int(i / n_chambers)
-                ch_num   = i % 24
-                
-                el = el_lst[i]
-                if not el:
-                    continue
-                
-                if int(el[3]) < coverage_cut:
-                    continue
-                if ref_base == None:
-                    ref_base = str.upper(el[2])
-                else:
-                    try:
-                        assert(ref_base == str.upper(el[2]))
-                    except:
-                        set_trace()
-                if ref_base == 'N':
-                    continue
-                
-                assert(ref_base in bases)
-                
-                nonzero_chambers_flatix.append(i)
-                nonzero_chambers[cell_num].append(ch_num)        
-        
-                bd = str.upper(re.sub(r'\^.|\$', '', el[4]))
-                
-                bd = re.sub(r'\.|\,', ref_base, bd)
-                qd = [((ord(q) - 33) * -0.1) for q in el[5]]
+            chrom = el[0]
+            pos   = int(el[1]) - 1
+            ref_base = str.upper(el[2])
 
-                bd, qd = zip(*[(b,q) for b,q in zip(bd,qd) if b not in ['>','<','*']])
+            if ref_base == 'N':
+                continue
+            assert(ref_base in bases)
 
+            for cell_num in range(n_cells):
+                for ch_num in range(n_chambers):
                 
-                assert(len(bd) == len(qd))
+                    flat_ix = cell_num * n_chambers + ch_num
+                    col_ix = 3 + 4 * flat_ix
+                    
+                    depth = int(el[col_ix])
+                    
+                    if depth < coverage_cut or el[col_ix + 1] == '*':
+                        continue
 
+                    nonzero_chambers[cell_num].append(ch_num)        
+                    nonzero_chamber_count += 1
+                    
+                    bd = str.upper(re.sub(r'\^.|\$', '', el[col_ix + 1]))
+                    bd = re.sub(r'\.|\,', ref_base, bd)
+                    qd = [((ord(q) - 33) * -0.1) for q in el[col_ix + 2]]
+    
+                    bd, qd = zip(*[(b,q) for b,q in zip(bd,qd) if b not in ['>','<','*']])
+    
+                    assert(len(bd) == len(qd))
+    
+                    base_data[cell_num][ch_num] = bd
+                    qual_data[cell_num][ch_num] = qd
                 
-                base_data[cell_num][ch_num] = bd
-                qual_data[cell_num][ch_num] = qd
-            
-            outline_el = ['-']*(n_chambers*n_cells)
+            outline_el = ['*']*(n_chambers*n_cells)
             
             too_many_chambers = False
-            
             for nz in nonzero_chambers:
                 if len(nz) > 4:
                     too_many_chambers = True
                     tags.append('TOO_MANY_CHAMBERS')
                     break
                
-            if nonzero_chambers_flatix != [] and not too_many_chambers:
+            if nonzero_chamber_count > 0 and not too_many_chambers:
                 
                 pr_one_ch = precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers)
                 
@@ -770,7 +653,6 @@ def call_chamber_alleles(input_dir, output, region):
                         out_str = ';'.join(['{}:{}'.format(''.join(a),p) for a,p in res])
                         
                         outline_el[cell*n_chambers + chamber] = out_str
-
             
             outline_el = [chrom, str(pos+1)] + outline_el
             tag_info = ';'.join(tags) if tags != [] else 'N/A'
@@ -779,24 +661,10 @@ def call_chamber_alleles(input_dir, output, region):
 
             print(outline, file=opf)
             
-            PROCESSED += 1
-            if PROCESSED > 500:
-                return
-            # iterate to the next lines for each line on the current index        
-            for i in np.where(on_chrom_pos)[0]:
-    
-                lines[i] = safenext(input_files[i])
-
-    # close all chambers
-            
-    for handle in input_files:
-        handle.close()
-        
-
 if __name__ == '__main__':
     t1 = time.time()
     args = parseargs()
-    call_chamber_alleles(args.input_dir, args.output, args.region)
+    call_chamber_alleles(args.input_file, args.output_file)
     t2 = time.time()
     
     print("TOTAL TIME: {} s".format(int(t2-t1)))
