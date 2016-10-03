@@ -8,22 +8,10 @@ __default__:
     ppn:             1
     walltime:        '10:00:00'
 
-estimate_parameter:
+call_alleles:
     ppn: 2
     walltime: '100:00:00'
 
-run_freebayes:
-    ppn: 2
-    walltime: '30:00:00'
-
-combined_pileup:
-    ppn: 4
-    walltime: '159:00:00'
-
-pileups:
-    ppn: 2
-    walltime: '50:00:00'
-
-add_chr_prefix:
+pileup:
     ppn: 1
     walltime: '50:00:00'

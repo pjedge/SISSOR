@@ -2,49 +2,55 @@ from collections import defaultdict
 import pickle
 import random
 import estimate_parameters
+import fix_sam
 
 localrules: all, simlinks
+
+rule all:
+    input:
+        #'output/chamber_allele_calls.out'
+        'output/split/chr1.80000001.85000000.out'
+        #'parameters/chrX_covs.p'
+        #expand('pileups/split/{r}.pileup',r=regions)
 
 samples = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
 chambers_pad = ['{0:02d}'.format(c) for c in chambers]
+grams_DNA_before_MDA  = 0.25e-12  # 0.25 pg
+grams_DNA_after_MDA = 6e-9        # 6 ng
 
-chunksize = int(2e6)
+chunksize = int(5e6)
 
 SAMTOOLS = '/opt/biotools/samtools/1.3/bin/samtools'
-HG19     = '/home/wkchu/zhang_lab_oasis/resources_v2.8_b37/human_g1k_v37_decoy.fasta' #'/oasis/tscc/scratch/pedge/data/genomes/hg19/hg19.fa'
+HG19     = '/oasis/tscc/scratch/pedge/data/genomes/hg19/hg19.fa' #'/home/wkchu/zhang_lab_oasis/resources_v2.8_b37/human_g1k_v37_decoy.fasta'
 PGP1_21_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/BAM'
 PGP1_22_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/previous/BAM'
 PGP1_A1_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/HiSeqCombinedBAM'
 
-hg19_sizes = '''1	249250621
-2	243199373
-3	198022430
-4	191154276
-5	180915260
-6	171115067
-7	159138663
-X	155270560
-8	146364022
-9	141213431
-10	135534747
-11	135006516
-12	133851895
-13	115169878
-14	107349540
-15	102531392
-16	90354753
-17	81195210
-18	78077248
-20	63025520
-Y	59373566
-19	59128983
-22	51304566
-21	48129895'''
-hg19_size_list = []
-for line in hg19_sizes.split('\n'):
-    c,l = line.split('\t')
-    hg19_size_list.append((c,int(l)))
+hg19_size_list = [('chr1', 249250621),
+ ('chr2', 243199373),
+ ('chr3', 198022430),
+ ('chr4', 191154276),
+ ('chr5', 180915260),
+ ('chr6', 171115067),
+ ('chr7', 159138663),
+ ('chr8', 146364022),
+ ('chr9', 141213431),
+ ('chr10', 135534747),
+ ('chr11', 135006516),
+ ('chr12', 133851895),
+ ('chr13', 115169878),
+ ('chr14', 107349540),
+ ('chr15', 102531392),
+ ('chr16', 90354753),
+ ('chr17', 81195210),
+ ('chr18', 78077248),
+ ('chr19', 59128983),
+ ('chr20', 63025520),
+ ('chr21', 48129895),
+ ('chr22', 51304566),
+ ('chrX', 155270560),
+ ('chrY', 59373566)]
 
 # create chunks of hg19
 # return list of (chrom,start,stop) tuples. stop is inclusive
@@ -54,71 +60,91 @@ for chrom, chrlen in hg19_size_list:
         end = start+chunksize-1 if start+chunksize-1 < chrlen else chrlen
         chunklist.append((chrom,start,end))
 
-#chunklist = [(a,b,c) for a,b,c in chunklist] # if a == '20']
 regions = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in chunklist]
+#regions = regions[50:51]  # test sample
 
-rule all:
-    input:
-        'output/chamber_allele_calls.txt'
-
-NUM_CHUNKS = 1000
-chunknum = ['{0:03d}'.format(i) for i in range(0,NUM_CHUNKS)]
 rule combine_base_calls:
     params: job_name = 'combine_base_calls'
-    input:  expand('output/split/chunk{C}',chunknum)
-    output: 'output/calls'
+    input:  expand('output/split/{r}.out',r=regions)
+    output: 'output/chamber_allele_calls.out'
     shell: 'cat {input} > {output}'
 
 rule call_alleles:
-    params: job_name = 'call_alleles'
-    input:  'pileups/split/chunk{C}.pileup'
-    output: 'output/split/chunk{C}'
+    params: job_name = 'call_alleles.{r}'
+    input:  'pileups/split/{r}.pileup',
+            'parameters/cov_frac_dist.p',
+            'parameters/p_null.p',
+            'parameters/ch_priors.p',
+            'parameters/hom_config_probs.p',
+            'parameters/het_config_probs.p',
+            'parameters/genotype_priors.p',
+            'parameters/omega.p'
+    output: 'output/split/{r}.out'
     run:
-        call_chamber_alleles.call_chamber_alleles(input, output)
-
-rule combine_parameters:
-    params: job_name = 'combine_parameters'
-    input:  expand('parameters/split/chrX_covs{C}.p',chunknum),
-            expand('parameters/split/chamber_position_counts{C}.p',chunknum),
-            expand('parameters/split/strand_coverage_counts{C}.p',chunknum),
-            expand('parameters/split/total_sampled_cell_positions{C}.p',chunknum),
-    output: "parameters/chrX_covs.p",
-            "parameters/chamber_position_counts.p",
-            "parameters/strand_coverage_counts.p",
-            "parameters/total_sampled_cell_positions.p",
-            "parameters/cov_frac_dist.p"
-    run:
-        estimate_parameters.combine_parameters(chunknum)
+        import call_chamber_alleles as cca
+        cca.call_chamber_alleles(input[0], output[0])
 
 rule estimate_parameters:
     params: job_name = 'estimate_parameters'
-    input:  'pileups/split/chunk{C}.pileup'
-    output: 'parameters/split/chrX_covs{C}.p',
-            'parameters/split/chamber_position_counts{C}.p',
-            'parameters/split/strand_coverage_counts{C}.p',
-            'parameters/split/total_sampled_cell_positions{C}.p',
+    input:  expand('parameters/split/chrX_covs.{r}.p',r=regions),
+            expand('parameters/split/chamber_position_counts.{r}.p',r=regions),
+            expand('parameters/split/strand_coverage_counts.{r}.p',r=regions),
+            expand('parameters/split/total_sampled_cell_positions.{r}.p',r=regions),
+    output: 'parameters/chrX_covs.p',
+            'parameters/chamber_position_counts.p',
+            'parameters/strand_coverage_counts.p',
+            'parameters/total_sampled_cell_positions.p',
+            'parameters/cov_frac_dist.p',
+            'parameters/p_null.p',
+            'parameters/ch_priors.p',
+            'parameters/hom_config_probs.p',
+            'parameters/het_config_probs.p',
+            'parameters/genotype_priors.p',
+            'parameters/omega.p'
     run:
-        estimate_parameters.estimate_parameters(input, wildcards.C)
+        estimate_parameters.estimate_parameters(regions,grams_DNA_before_MDA,grams_DNA_after_MDA)
 
-rule split_pileup:
-    params: job_name = 'split_pileup'
-    input:  'pileups/combined.pileup'
-    output: expand('pileups/split/chunk{C}.pileup',chunknum)
-    shell: 'split -n {NUM_CHUNKS} -a 3 -d --additional-suffix .pileup {input} pileups/split/chunk'
+rule obtain_counts_parallel:
+    params: job_name = 'obtain_counts_parallel.{r}'
+    input:  'pileups/split/{r}.pileup'
+    output: 'parameters/split/chrX_covs.{r}.p',
+            'parameters/split/chamber_position_counts.{r}.p',
+            'parameters/split/strand_coverage_counts.{r}.p',
+            'parameters/split/total_sampled_cell_positions.{r}.p',
+    run:
+        estimate_parameters.obtain_counts_parallel(input[0], wildcards.r)
 
-rule combined_pileup:
-    params: job_name = 'combined_pileup'
-    input:  bams = expand('bams/{s}/ch{c}.bam',s=samples,c=chambers)
-    output: pileup = 'pileups/combined.pileup'
-    shell:  '{SAMTOOLS} mpileup --adjust-MQ 50 --max-depth 100 --output-MQ --min-MQ 30 --min-BQ 20 --fasta-ref {HG19} --output {output.pileup} {input.bams}'
+rule pileup:
+    params: job_name = 'pileup.{r}',
+            chrom = lambda wildcards: wildcards.r.split('.')[0],
+            start = lambda wildcards: wildcards.r.split('.')[1],
+            stop  = lambda wildcards: wildcards.r.split('.')[2]
+    input:  bams = expand('bams/{s}/ch{c}.bam',s=samples,c=chambers),
+            bais = expand('bams/{s}/ch{c}.bam.bai',s=samples,c=chambers)
+    output: pileup = 'pileups/split/{r}.pileup'
+    shell:  '{SAMTOOLS} mpileup --region {params.chrom}:{params.start}-{params.stop} --adjust-MQ 50 --max-depth 100 --output-MQ --min-MQ 30 --min-BQ 20 --fasta-ref {HG19} --output {output.pileup} {input.bams}'
+
+rule index_bam:
+    params: job_name = 'index_bam{s}.{c}'
+    input:  bam = 'bams/{s}/ch{c}.bam'
+    output: bai = 'bams/{s}/ch{c}.bam.bai'
+    shell:  '{SAMTOOLS} index {input.bam} {output.bai}'
 
 # PGP1_22 and PGP1_A1 don't have chr before chromosome labels. necessary for pileup to include reference
 # credit to petervangalen and Pierre Lindenbaum for this rule's code: https://www.biostars.org/p/13462/
-rule add_chr_prefix:
-    params: job_name = 'add_chr_prefix.{s}.{c}'
-    input:  'bams/{s}/ch{c}.no_chr_prefix.bam'
-    output: 'bams/{s}/ch{c}.bam'
-    shell: '''{SAMTOOLS} view -H {input} | sed -e 's/SN:1/SN:chr1/' | sed -e 's/SN:2/SN:chr2/' | sed -e 's/SN:3/SN:chr3/' | sed -e 's/SN:4/SN:chr4/' | sed -e 's/SN:5/SN:chr5/' | sed -e 's/SN:6/SN:chr6/' | sed -e 's/SN:7/SN:chr7/' | sed -e 's/SN:8/SN:chr8/' | sed -e 's/SN:9/SN:chr9/' | sed -e 's/SN:10/SN:chr10/' | sed -e 's/SN:11/SN:chr11/' | sed -e 's/SN:12/SN:chr12/' | sed -e 's/SN:13/SN:chr13/' | sed -e 's/SN:14/SN:chr14/' | sed -e 's/SN:15/SN:chr15/' | sed -e 's/SN:16/SN:chr16/' | sed -e 's/SN:17/SN:chr17/' | sed -e 's/SN:18/SN:chr18/' | sed -e 's/SN:19/SN:chr19/' | sed -e 's/SN:20/SN:chr20/' | sed -e 's/SN:21/SN:chr21/' | sed -e 's/SN:22/SN:chr22/' | sed -e 's/SN:X/SN:chrX/' | sed -e 's/SN:Y/SN:chrY/' | sed -e 's/SN:MT/SN:chrM/' | {SAMTOOLS} reheader - {input} > {output}'''
+
+rule fix_sam:
+    params: job_name = 'fix_sam.{s}.{c}'
+    input:  sam = 'bams/{s}/old.ch{c}.sam'
+    output: bam = 'bams/{s}/ch{c}.bam'
+    run:
+        fix_sam.fix_sam(input.sam,output.bam)
+
+rule bam2sam:
+    params: job_name = 'bam2sam.{s}.{c}'
+    input:  'bams/{s}/old.ch{c}.bam'
+    output: temp(rules.fix_sam.input)
+    shell: '{SAMTOOLS} view -h {input} > {output}'
 
 # simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
 rule simlinks:
@@ -127,6 +153,6 @@ rule simlinks:
             shell('''
             mkdir -p bams/PGP1_21 bams/PGP1_22 bams/PGP1_A1
             ln -s {PGP1_21_dir}/PGP1_21_ch{chpad}.sorted.chr.bam bams/PGP1_21/ch{ch}.bam
-            ln -s {PGP1_22_dir}/PGP1_22_ch{chpad}.sorted.bam bams/PGP1_22/ch{ch}.no_chr_prefix.bam
-            ln -s {PGP1_A1_dir}/PGP1_A1_ch{chpad}.sorted.bam bams/PGP1_A1/ch{ch}.no_chr_prefix.bam
+            ln -s {PGP1_22_dir}/PGP1_22_ch{chpad}.sorted.bam bams/PGP1_22/old.ch{ch}.bam
+            ln -s {PGP1_A1_dir}/PGP1_A1_ch{chpad}.sorted.bam bams/PGP1_A1/old.ch{ch}.bam
             ''')

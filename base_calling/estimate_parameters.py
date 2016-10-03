@@ -6,19 +6,19 @@ Created on Wed Sep 21 14:51:49 2016
 @author: peter
 """
 
-import argparse
 import pickle
 import os
 #import sys
 #from collections import defaultdict
 import itertools
-from math import log10
+from math import log10, factorial
 from functools import reduce
 import operator
 from pdb import set_trace
 from collections import defaultdict
 import random
 import bisect
+import math
 if False:
     set_trace() # to dodge warnings that pdb isn't being used.
 #from copy import deepcopy
@@ -28,20 +28,6 @@ desc = 'Use cross-chamber information to call chamber alleles in SISSOR data'
 
 default_input_dir = 'pileups_subsample'
 default_output_dir = 'parameters'
-
-###############################################################################
-# PARSE STDIN
-###############################################################################
-
-def parseargs():
-
-    parser = argparse.ArgumentParser(description=desc)
-    parser.add_argument('-i', '--input_file', nargs='?', type = str, help='input file with 3 cells x 24 chambers pileups', default=default_input_dir)
-    parser.add_argument('-o', '--output_dir', nargs='?', type = str, help='file to write output to', default=default_output_dir)
-
-    args = parser.parse_args()
-    return args
-
 ###############################################################################
 # CONSTANTS
 ###############################################################################
@@ -53,22 +39,13 @@ n_chambers = 24
 chambers = list(range(1,n_chambers+1))
 bases = ['A','T','G','C']
 genotypes = list(itertools.combinations_with_replacement(bases,2))
-
-short_chrom_names = set([str(x) for x in range(1,23)]+['X','Y'])
-chrom_names = set(['chr'+str(x) for x in range(1,23)]+['chrX','chrY'])    
-    
-###############################################################################
-# TEMPORARILY HARDCODED (need to be estimated form data in final version)
-###############################################################################
-
-p_null = 0.5          # probability that strand is not sampled in chamber. hardcoded until we can estimate it
-ch_priors = [log10((1-p_null)/n_chambers)]*n_chambers + [log10(p_null)]   # prior probability of sampling a given chamber
-
+het_snp_rate = 0.0005
+hom_snp_rate = 0.001
 n_cells = 3
 
-# PROBABILITY OF SEEING PARENT 1 ALLELE IN MIXED ALLELE CHAMBER
+short_chrom_names = set([str(x) for x in range(1,23)]+['X','Y'])
+chrom_names = set(['chr'+str(x) for x in range(1,23)]+['chrX','chrY'])
 
-P_parent1_lst = [(0.001,log10(0.495)),(0.5,log10(0.01)),(0.999,log10(0.495))]
 ###############################################################################
 # HELPER FUNCTIONS
 ###############################################################################
@@ -87,7 +64,7 @@ def format_chrom(chrom_str):
         chrom_str = 'chr' + chrom_str
     assert(chrom_str in chrom_names)
     return chrom_str
-        
+
 # product of list
 def prod(iterable): # credit to: http://stackoverflow.com/questions/7948291/is-there-a-built-in-product-in-python
     return reduce(operator.mul, iterable, 1)
@@ -110,7 +87,7 @@ def remove_multiple_strings(cur_string, replace_list):  # credit to http://stack
   for cur_word in replace_list:
     cur_string = cur_string.replace(cur_word, '')
   return cur_string
-    
+
 
 # credit to David for this function: http://stackoverflow.com/questions/526255/probability-distribution-in-python
 def weighted_choice_bisect_compile(items):
@@ -125,26 +102,26 @@ def weighted_choice_bisect_compile(items):
     def choice(rnd=random.random, bis=bisect.bisect):
         return items[bis(added_weights, rnd() * last_sum)][0]
     return choice
-    
+
 ###############################################################################
 # MAIN FUNCTIONS AND PARSING
 ###############################################################################
 
-def combine_parameters(suffixes):
+def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
 
     chrX_covs = defaultdict(int)
     chamber_position_counts = defaultdict(int)
     strand_coverage_counts = defaultdict(int)
     total_sampled_cell_positions = 0
-    
+
     for suffix in suffixes:
-        
+
         # LOAD PICKLE FILES
-        partial_chrX_covs = pickle.load(open("parameters/split/chrX_covs{}.p".format(suffix), "rb" ))
-        partial_chamber_position_counts = pickle.load(open("parameters/split/chamber_position_counts{}.p".format(suffix), "rb" ))
-        partial_strand_coverage_counts = pickle.load(open("parameters/split/strand_coverage_counts{}.p".format(suffix), "rb" ))
-        partial_total_sampled_cell_positions = pickle.load(open("parameters/split/total_sampled_cell_positions{}.p".format(suffix), "rb" ))
-        
+        partial_chrX_covs = pickle.load(open("parameters/split/chrX_covs.{}.p".format(suffix), "rb" ))
+        partial_chamber_position_counts = pickle.load(open("parameters/split/chamber_position_counts.{}.p".format(suffix), "rb" ))
+        partial_strand_coverage_counts = pickle.load(open("parameters/split/strand_coverage_counts.{}.p".format(suffix), "rb" ))
+        partial_total_sampled_cell_positions = pickle.load(open("parameters/split/total_sampled_cell_positions.{}.p".format(suffix), "rb" ))
+
         for k,v in partial_chrX_covs.items():
             chrX_covs[k] += v
 
@@ -161,33 +138,239 @@ def combine_parameters(suffixes):
     total = sum([b for a,b in chrX_covs_tuple])
     chrX_covs_probs = [(a,b/total) for a,b in chrX_covs_tuple]
     chrX_covs_func  = weighted_choice_bisect_compile(chrX_covs_probs)
-    # cov_frac_dist is used in the following way:
-    # cov_frac_dist[cov][i] where i=1..cov tells the probability of allele p1 being present in fraction 
+    # cov_frac_dist_raw is used in the following way:
+    # cov_frac_dist_raw[cov][i] where i=1..cov tells the probability of allele p1 being present in fraction
     num_samples = 100000000
+    cov_frac_dist_raw = defaultdict(list)
+    cov_frac_dist_raw_counts = defaultdict(list)
     cov_frac_dist = defaultdict(list)
-    cov_frac_dist_counts = defaultdict(list)
-    
+
     for i in range(num_samples):
         cov1 = chrX_covs_func()
         cov2 = chrX_covs_func()
         tcov = cov1 + cov2
-        if cov_frac_dist_counts[tcov] == []:
-            cov_frac_dist_counts[tcov] = [0]*tcov
-        cov_frac_dist_counts[tcov][cov1] += 1
-    
-    for cov in cov_frac_dist_counts.keys():
-        for i, count in enumerate(cov_frac_dist_counts[cov]):
-            cov_frac_dist[cov].append(count/sum(cov_frac_dist_counts[cov]))
-        assert(len(cov_frac_dist[cov]) == cov)
-        
+        if cov_frac_dist_raw_counts[tcov] == []:
+            cov_frac_dist_raw_counts[tcov] = [0]*tcov
+        cov_frac_dist_raw_counts[tcov][cov1] += 1
+
+    for cov in cov_frac_dist_raw_counts.keys():
+        for i, count in enumerate(cov_frac_dist_raw_counts[cov]):
+            cov_frac_dist_raw[cov].append(count/sum(cov_frac_dist_raw_counts[cov]))
+        assert(len(cov_frac_dist_raw[cov]) == cov)
+
+
+    lim = 30
+    for i in range(1,lim+1):
+        cov_frac_dist[i] = cov_frac_dist_raw[i]
+
+    def chunks(l, n): # credit to http://stackoverflow.com/questions/312443/how-do-you-split-a-list-into-evenly-sized-chunks
+        """Yield successive n-sized chunks from l."""
+        for i in range(0, len(l), n):
+            yield l[i:i + n]
+
+    # given a list with length N*binsize, sum consectutive binsize-sized chunks into a length N list
+    def condense(l, binsize):
+        return [sum(x) for x in chunks(l,binsize)]
+
+
+    last_lst = []
+    for i in range(lim,2000,lim):
+        binsize = int(i / lim)
+        lst = condense(cov_frac_dist_raw[i], binsize)
+        if lst == []:
+            lst = last_lst
+        for j in range(i,i+lim):
+            cov_frac_dist[j] = lst
+        last_lst = lst
+
+    for i in range(lim,2000):
+        assert(len(cov_frac_dist[i]) == lim)
+    '''
+    for i in range(1,200,10):
+        plt.figure()
+        y = cov_frac_dist[i]
+        x = list(range(len(cov_frac_dist[i])))
+        plt.plot(x,y)
+        plt.title(str(i))
+    '''
+
+
+    total_position_counts = sum([chamber_position_counts[chamber] for chamber in range(0,24)])
+    chamber_proportions = [chamber_position_counts[chamber]/total_position_counts for chamber in range(0,24)]
+    chamber_proportions = [x if x != 0 else 1e-10 for x in chamber_proportions]
+
+    p_null = None
+    ch_priors = None
+    max_likelihood = -float("Inf")
+    p_null_samples = 1000
+
+    for i in range(1,p_null_samples):
+
+        putative_p_null = i/p_null_samples
+        putative_ch_priors = [log10((1-putative_p_null) * x) for x in chamber_proportions] + [log10(putative_p_null)]   # prior probability of sampling a given chamber
+
+        # given these proportions, compute the expected proportions of positions
+        # with a given number of strands present.
+
+        poss_ch = list(range(0,25)) # the last element is "no chamber"
+        coverage_dict = dict()
+        for j in range(0,5):
+            coverage_dict[j] = -1e10
+        seen_cfgs = set()
+
+        for c1,c2,c3,c4 in itertools.product(poss_ch,poss_ch,poss_ch,poss_ch):
+            # because of symmetry we ignore cases where we can flip the strands for the same result
+            # e.g. we ignore cases where strand 1 is in a later chamber than strand 2 and say that
+            # the cases where it is in an earlier chamber are twice as likely. Same for strands 3,4
+            if c1 > c2:
+                temp = c1
+                c1 = c2
+                c2 = temp
+
+            if c3 > c4:
+                temp = c3
+                c3 = c4
+                c4 = temp
+
+            if (c1,c2,c3,c4) in seen_cfgs:
+                continue
+
+            if c1 < c2 and c3 < c4:
+                perm = log10(4)
+            elif (c1 < c2 and c3 == c4) or (c1 == c2 and c3 < c4):
+                perm = log10(2)
+            elif c1 == c2 and c3 == c4:
+                perm = log10(1)
+            else:
+                continue
+            seen_cfgs.add((c1,c2,c3,c4))
+            strands_present = 4
+            for c in [c1,c2,c3,c4]:
+                if c == 24:
+                    strands_present -= 1
+
+            cfg_prob = perm+putative_ch_priors[c1]+putative_ch_priors[c2]+putative_ch_priors[c3]+putative_ch_priors[c4]
+            coverage_dict[strands_present] = addlogs(coverage_dict[strands_present],cfg_prob) # probability of configuration
+
+        likelihood = 0
+        for j in range(0,5):
+            # the likelihood of the observed data given this value for p_null
+            # is the product of likelihoods of each observed coverage value
+            likelihood += strand_coverage_counts[j] * coverage_dict[j]
+
+
+        expected_proportions = [10**x for x in coverage_dict.values()]
+
+        print("i={} ".format(i),end='')
+        print(expected_proportions,end='')
+        print(likelihood)
+
+        if likelihood > max_likelihood:
+            max_likelihood = likelihood
+            p_null = putative_p_null
+            ch_priors = putative_ch_priors
+
+    # helper data structures that pre-compute probabilities of strand configurations
+    poss_ch = list(range(0,25)) # the last element is "no chamber"
+    het_config_probs = dict()
+
+    for c1,c2,c3,c4 in itertools.product(poss_ch,poss_ch,poss_ch,poss_ch):
+        # because of symmetry we ignore cases where we can flip the strands for the same result
+        # e.g. we ignore cases where strand 1 is in a later chamber than strand 2 and say that
+        # the cases where it is in an earlier chamber are twice as likely. Same for strands 3,4
+        if c1 > c2:
+            temp = c1
+            c1 = c2
+            c2 = temp
+
+        if c3 > c4:
+            temp = c3
+            c3 = c4
+            c4 = temp
+
+        if (c1,c2,c3,c4) in het_config_probs:
+            continue
+
+        if c1 < c2 and c3 < c4:
+            perm = log10(4)
+        elif (c1 < c2 and c3 == c4) or (c1 == c2 and c3 < c4):
+            perm = log10(2)
+        elif c1 == c2 and c3 == c4:
+            perm = log10(1)
+        else:
+            continue
+
+        het_config_probs[(c1,c2,c3,c4)] = perm+ch_priors[c1]+ch_priors[c2]+ch_priors[c3]+ch_priors[c4] # probability of configuration
+
+    hom_config_probs = dict()
+
+    for c1,c2,c3,c4 in itertools.product(poss_ch,poss_ch,poss_ch,poss_ch):
+
+        lst  = sorted([c1,c2,c3,c4])
+        if tuple(lst) in hom_config_probs:
+            continue
+        uniq = list(set(lst))
+        counts  = [lst.count(u) for u in uniq]
+        perm = log10(factorial(len(lst))/prod([factorial(c) for c in counts]))
+
+        hom_config_probs[tuple(lst)] = perm+ch_priors[c1]+ch_priors[c2]+ch_priors[c3]+ch_priors[c4] # probability of configuration
+
+    # estimate prior probability of genotypes using strategy described here:
+    # http://www.ncbi.nlm.nih.gov/pmc/articles/PMC2694485/
+    # "prior probability of each genotype"
+    genotype_priors = dict()
+    transition = {'A':'G','G':'A','T':'C','C':'T'}
+    alleles = ['A','T','G','C']
+
+    for allele in alleles:
+
+        # priors on haploid alleles
+        p_a = dict()
+        p_a[allele] = 1 - hom_snp_rate
+        p_a[transition[allele]] = hom_snp_rate / 6 * 4
+        for transversion in alleles:
+            if transversion in p_a:
+                continue
+            p_a[transversion] =  hom_snp_rate / 6
+
+        genotype_priors[allele] = dict()
+        for G in genotypes:
+            g1,g2 = G
+            # probability of homozygous reference is the probability of neither het or hom SNP
+            if g1 == g2 and g1 == allele:
+                genotype_priors[allele][G] = 1.0 - het_snp_rate - hom_snp_rate
+            elif g1 == g2 and g1 != allele:
+                # transitions are 4 times as likely as transversions
+                if g1 == transition[allele]:
+                    genotype_priors[allele][G] = het_snp_rate / 6 * 4
+                else:
+                    genotype_priors[allele][G] = het_snp_rate / 6
+            else: # else it's the product of the haploid priors
+                    genotype_priors[allele][G] = p_a[g1] * p_a[g2]
+
+        # convert to log
+        for G in genotype_priors[allele].keys():
+            genotype_priors[allele][G] = log10(genotype_priors[allele][G])
+
+    # ESTIMATE PER-BASE PROBABILITY OF MDA ERROR
+    # formula from this paper: http://journals.plos.org/plosone/article?id=10.1371/journal.pone.0105585
+    GAIN = grams_DNA_after_MDA / grams_DNA_before_MDA
+    omega = log10(3.2e-6 / 2 * math.log2(GAIN)) # probability of MDA error.
+
    # WRITE PARAMETERS TO PICKLE FILES
     pickle.dump(chrX_covs, open("parameters/chrX_covs.p", "wb"))
     pickle.dump(chamber_position_counts, open("parameters/chamber_position_counts.p","wb"))
     pickle.dump(strand_coverage_counts, open("parameters/strand_coverage_counts.p","wb"))
     pickle.dump(total_sampled_cell_positions, open("parameters/total_sampled_cell_positions.p","wb"))
     pickle.dump(cov_frac_dist, open("parameters/cov_frac_dist.p","wb"))
+    pickle.dump(p_null, open("parameters/p_null.p", "wb"))
+    pickle.dump(ch_priors, open("parameters/ch_priors.p","wb"))
+    pickle.dump(hom_config_probs, open("parameters/hom_config_probs.p","wb"))
+    pickle.dump(het_config_probs, open("parameters/het_config_probs.p","wb"))
+    pickle.dump(genotype_priors, open("parameters/genotype_priors.p","wb"))
+    pickle.dump(omega, open("parameters/omega.p","wb"))
 
-def estimate_parameters(input_file, suffix=''):
+def obtain_counts_parallel(input_file, suffix=''):
 
     coverage_cut = 3
 
@@ -195,10 +378,10 @@ def estimate_parameters(input_file, suffix=''):
     chamber_position_counts = defaultdict(int)
     strand_coverage_counts = defaultdict(int)
     total_sampled_cell_positions = 0
-    
+
     with open(input_file,'r') as ipf:
         for line in ipf:
-            
+
             el = line.strip().split('\t')
 
             chrom = el[0]
@@ -207,18 +390,18 @@ def estimate_parameters(input_file, suffix=''):
             if ref_base == 'N':
                 continue
             assert(ref_base in bases)
-                
-            strand_counts = defaultdict(int)             
+
+            strand_counts = defaultdict(int)
 
             for cell_num in range(n_cells):
                 for ch_num in range(n_chambers):
-                
+
                     flat_ix = cell_num * n_chambers + ch_num
                     col_ix = 3 + 4 * flat_ix
-                    depth = int(el[col_ix])                        
+                    depth = int(el[col_ix])
                     if depth < coverage_cut or el[col_ix + 1] == '*':
                         continue
-                    
+
                     if chrom == 'chrX':
                         chrX_covs[depth] += 1
                     elif chrom != 'chrY':
@@ -235,11 +418,7 @@ def estimate_parameters(input_file, suffix=''):
         os.makedirs(output_dir)
 
     # WRITE PARAMETERS TO PICKLE FILES
-    pickle.dump(chrX_covs, open( "parameters/split/chrX_covs{}.p".format(suffix), "wb" ))
-    pickle.dump(chamber_position_counts, open( "parameters/split/chamber_position_counts{}.p".format(suffix), "wb" ))
-    pickle.dump(strand_coverage_counts, open( "parameters/split/strand_coverage_counts{}.p".format(suffix), "wb" ))
-    pickle.dump(total_sampled_cell_positions, open( "parameters/split/total_sampled_cell_positions{}.p".format(suffix), "wb" ))
-
-if __name__ == '__main__':
-    args = parseargs()
-    estimate_parameters(args.input_file, args.output_dir)
+    pickle.dump(chrX_covs, open( "parameters/split/chrX_covs.{}.p".format(suffix), "wb" ))
+    pickle.dump(chamber_position_counts, open( "parameters/split/chamber_position_counts.{}.p".format(suffix), "wb" ))
+    pickle.dump(strand_coverage_counts, open( "parameters/split/strand_coverage_counts.{}.p".format(suffix), "wb" ))
+    pickle.dump(total_sampled_cell_positions, open( "parameters/split/total_sampled_cell_positions.{}.p".format(suffix), "wb" ))

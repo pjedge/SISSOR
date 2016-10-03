@@ -7,9 +7,11 @@ Created on Fri Sep 30 18:05:15 2016
 """
 import sys
 import pysam
+import copy
 
-def fix_sam(insam, outsam):
-    
+def fix_sam(insam, outbam):
+
+
     new_SQ = [{'LN': 249250621, 'SN': 'chr1'},
     {'LN': 243199373, 'SN': 'chr2'},
     {'LN': 198022430, 'SN': 'chr3'},
@@ -35,26 +37,29 @@ def fix_sam(insam, outsam):
     {'LN': 155270560, 'SN': 'chrX'},
     {'LN': 59373566, 'SN': 'chrY'},
     {'LN': 16569, 'SN': 'chrM'}]
-        
+
     infile = pysam.AlignmentFile(insam,"rb");
-    
+    new_header = copy.deepcopy(infile.header)
+
     convert_name = dict()
     for i in range(1,23):
-        convert_name[str(i)] = 'chr{}'.format(i)
-    convert_name['X'] = 'chrX'
-    convert_name['Y'] = 'chrY'
-    convert_name['MT'] = 'chrM'
-            
-    outfile = pysam.AlignmentFile(outsam,"wh", template=infile);
-    outfile.header['SQ'] = new_SQ
+        convert_name[str(i)] = i-1
+    convert_name['X'] = 22
+    convert_name['Y'] = 23
+    convert_name['MT'] = 24
+    new_header['SQ'] = new_SQ
+    outfile = pysam.AlignmentFile(outbam,"wb", header=new_header);
+
     for record in infile:
-        record.reference_name = convert_name[record.reference_name]
-        outfile.write(record)
+        if record.reference_id != -1 and record.reference_name in convert_name:
+            record.reference_id = convert_name[record.reference_name]
+            outfile.write(record)
     infile.close()
     outfile.close()
-    
-    
+
+
 if __name__ == '__main__':
+
     insam = sys.argv[1]
-    outsam = sys.argv[2]
-    fix_sam(insam,outsam)
+    outbam = sys.argv[2]
+    fix_sam(insam,outbam)
