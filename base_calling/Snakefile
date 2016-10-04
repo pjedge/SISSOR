@@ -8,8 +8,8 @@ localrules: all, simlinks
 
 rule all:
     input:
-        #'output/chamber_allele_calls.out'
-        'output/split/chr1.80000001.85000000.out'
+        'output/chamber_allele_calls.out'
+        #'output/split/chr1.80000001.85000000.out'
         #'parameters/chrX_covs.p'
         #expand('pileups/split/{r}.pileup',r=regions)
 
@@ -27,6 +27,8 @@ PGP1_21_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/BAM'
 PGP1_22_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/previous/BAM'
 PGP1_A1_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/HiSeqCombinedBAM'
 
+hg19_size_list = [('chr1', 249250621)]
+'''
 hg19_size_list = [('chr1', 249250621),
  ('chr2', 243199373),
  ('chr3', 198022430),
@@ -51,7 +53,7 @@ hg19_size_list = [('chr1', 249250621),
  ('chr22', 51304566),
  ('chrX', 155270560),
  ('chrY', 59373566)]
-
+'''
 # create chunks of hg19
 # return list of (chrom,start,stop) tuples. stop is inclusive
 chunklist = []

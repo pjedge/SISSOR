@@ -9,8 +9,8 @@ __default__:
     walltime:        '10:00:00'
 
 call_alleles:
-    ppn: 2
-    walltime: '100:00:00'
+    ppn: 1
+    walltime: '40:00:00'
 
 pileup:
     ppn: 1
