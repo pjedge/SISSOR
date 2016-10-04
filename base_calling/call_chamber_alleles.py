@@ -89,6 +89,8 @@ def remove_multiple_strings(cur_string, replace_list):  # credit to http://stack
 ###############################################################################
 
 coverage_cut = 3
+max_cov = 100
+min_nonref = 2
 chroms = ['chr{}'.format(i) for i in range(1,23)] + ['chrX','chrY']
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 n_chambers = 24
@@ -407,7 +409,7 @@ def pr_allele(cell, chamber, pr_one_ch, nonzero_chambers, mixed_allele_priors, r
 # MAIN FUNCTION AND PARSING
 ###############################################################################
 
-def call_chamber_alleles(input_file, output_file):
+def call_chamber_alleles(input_file, output_file, SNPs_only=True):
 
     mixed_allele_priors = compute_mixed_allele_priors()
 
@@ -430,6 +432,8 @@ def call_chamber_alleles(input_file, output_file):
                 continue
             assert(ref_base in bases)
 
+            total_nonref = 0
+            
             for cell_num in range(n_cells):
                 for ch_num in range(n_chambers):
 
@@ -455,9 +459,16 @@ def call_chamber_alleles(input_file, output_file):
 
                     assert(len(bd) == len(qd))
 
-                    base_data[cell_num][ch_num] = bd
-                    qual_data[cell_num][ch_num] = qd
+                    base_data[cell_num][ch_num] = bd[:max_cov]
+                    qual_data[cell_num][ch_num] = qd[:max_cov]
 
+                    for b in bd:
+                        if b != ref_base:
+                            total_nonref += 1
+            
+            if SNPs_only and total_nonref < min_nonref:
+                continue
+                            
             outline_el = ['*']*(n_chambers*n_cells)
 
             too_many_chambers = False
