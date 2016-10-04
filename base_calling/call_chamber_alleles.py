@@ -448,27 +448,32 @@ def call_chamber_alleles(input_file, output_file, SNPs_only=True):
                     nonzero_chambers[cell_num].append(ch_num)
                     nonzero_chamber_count += 1
 
-                    bd = str.upper(re.sub(r'\^.|\$', '', el[col_ix + 1]))
+                    bd = str.upper(re.sub(r'\^.|\$|\+[0-9]+[ACGTNacgtn]+|-[0-9]+[ACGTNacgtn]+', '', el[col_ix + 1]))
                     bd = re.sub(r'\.|\,', ref_base, bd)
                     qd = [10**((ord(q) - 33) * -0.1) for q in el[col_ix + 2]]
+                    assert(len(bd) == len(qd))
+                    assert(len(bd) == depth)
+
                     paired_bd_qd = [(b,q) for b,q in zip(bd,qd) if b not in ['>','<','*']]
                     if len(paired_bd_qd) < coverage_cut:
                         continue
-                    
+    
                     bd, qd = zip(*paired_bd_qd)
 
-                    assert(len(bd) == len(qd))
 
                     base_data[cell_num][ch_num] = bd[:max_cov]
                     qual_data[cell_num][ch_num] = qd[:max_cov]
 
                     for b in bd:
+                        assert(b in bases)
                         if b != ref_base:
                             total_nonref += 1
             
             if SNPs_only and total_nonref < min_nonref:
                 continue
-                            
+            
+            continue
+            
             outline_el = ['*']*(n_chambers*n_cells)
 
             too_many_chambers = False
