@@ -10,17 +10,15 @@ import re
 from pdb import set_trace
 if False:
     set_trace() # to dodge warnings that pdb isn't being used.
-from copy import deepcopy
-from collections import defaultdict
 import time
-import math
 import pickle
+import copy
 #import sys
 #from matplotlib import pyplot as plt
 desc = 'Use cross-chamber information to call chamber alleles in SISSOR data'
 
-default_input_dir = 'pileups_subsample'
-default_output_dir = 'output_calls.txt'
+default_input_file = 'test_subsample.txt'
+default_output_file = 'output_calls.txt'
 
 ###############################################################################
 # PARSE STDIN
@@ -29,8 +27,8 @@ default_output_dir = 'output_calls.txt'
 def parseargs():
 
     parser = argparse.ArgumentParser(description=desc)
-    parser.add_argument('-i', '--input_file', nargs='?', type = str, help='input file, pileup with 3 cells x 24 chambers', default=default_input_dir)
-    parser.add_argument('-o', '--output_file', nargs='?', type = str, help='file to write output to', default=default_output_dir)
+    parser.add_argument('-i', '--input_file', nargs='?', type = str, help='input file, pileup with 3 cells x 24 chambers', default=default_input_file)
+    parser.add_argument('-o', '--output_file', nargs='?', type = str, help='file to write output to', default=default_output_file)
     #parser.add_argument('-r', '--region', nargs='?', type = str, help='region to process in format {CHR}:{START}-{END} to process (END excluded)', default=None)
 
     # default to help option. credit to unutbu: http://stackoverflow.com/questions/4042452/display-help-message-with-python-argparse-when-script-is-called-without-any-argu
@@ -115,6 +113,7 @@ hom_config_probs = pickle.load(open( "parameters/hom_config_probs.p", "rb")) # S
 het_config_probs = pickle.load(open( "parameters/het_config_probs.p", "rb"))
 genotype_priors = pickle.load(open( "parameters/genotype_priors.p", "rb"))
 omega = pickle.load(open( "parameters/omega.p", "rb")) # per-base probability of MDA error
+omega_nolog = 10**omega
 
 # INPUT
 # G: a tuple that specifies genotype e.g. ('A','T')
@@ -223,6 +222,32 @@ def compute_mixed_allele_priors():
 
     return mixed_allele_priors
 
+one_allele_cache = dict()
+two_allele_cache = dict()
+def compute_caches():
+    for i in range(0,31):
+        for j in range(i+1,31):
+            for q in range(33,130):
+                for a1_match in [False,True]:
+                    for a2_match in [False,True]:
+                        qual = 10**((q - 33) * -0.1)
+                        frac = i / j if i > 1 else 1e-10
+                    
+                        x1 = (1.0-qual)*(1.0-omega_nolog) + omega_nolog*qual
+                        x2 = omega_nolog*(1.0-qual) + (1-omega_nolog)*qual
+                        p1 = x1 if a1_match else x2
+                        p2 = x1 if a2_match else x2
+                        two_allele_cache[((i / j),qual,a1_match,a2_match)] = log10(frac*p1 + (1-frac)*p2)
+
+                        
+    for q in range(33,130):
+        qual = 10**((q - 33) * -0.1)
+
+        one_allele_cache[(qual,True)] = log10((1.0-qual)*(1.0-omega_nolog) + omega_nolog*qual)
+        one_allele_cache[(qual,False)] = log10(omega_nolog*(1.0-qual) + (1-omega_nolog)*qual)
+
+compute_caches()
+
 def pr_one_chamber_data(alleles_present, base_data, qual_data):
 
     p = 0
@@ -232,31 +257,15 @@ def pr_one_chamber_data(alleles_present, base_data, qual_data):
     if len(alleles_present) == 1:
 
         for base,qual in zip(base_data, qual_data):
-            if alleles_present[0] == base:
-                p += addlogs(subtractlogs(0,qual)+subtractlogs(0,omega), qual+omega)
-            else:
-                p += addlogs(omega+subtractlogs(0,qual), qual+subtractlogs(0,omega))
+            p += one_allele_cache[(qual, (alleles_present[0] == base))]
 
     elif len(alleles_present) == 2:
 
-
-        a1 = alleles[0]
-        a2 = alleles[1]
-        cov = len(base_data)
-        for i, p0 in enumerate(cov_frac_dist[cov]):
-            frac = i / len(cov_frac_dist[cov]) if i > 1 else 1e-10
+        L = len(cov_frac_dist[n])
+        for i, p0 in enumerate(cov_frac_dist[n]):
+            frac = i / L
             for base,qual in zip(base_data, qual_data):
-
-                x1 = addlogs(subtractlogs(0,qual)+subtractlogs(0,omega), qual+omega)
-                x2 = addlogs(omega+subtractlogs(0,qual), qual+subtractlogs(0,omega))
-
-                p1 = x1 if a1 == base else x2
-                p2 = x1 if a2 == base else x2
-
-                p1 += log10(frac)
-                p2 += log10(1-frac)
-
-                p0 += addlogs(p1, p2)
+                p0 += two_allele_cache[(frac, qual, (alleles_present[0] == base), (alleles_present[1] == base))]
 
             p = addlogs(p, p0)
 
@@ -265,12 +274,44 @@ def pr_one_chamber_data(alleles_present, base_data, qual_data):
 def precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers):
 
     pr_one_ch = dict()
-
+    
     for cell in range(n_cells):
         for chamber in nonzero_chambers[cell]:
+            
+            # for alleles that are not present at all in the data, the probability of seeing
+            # them should be exactly the same.
+            present = dict()
+            for base in bases:
+                present[(base,)] = 0
+            for base in base_data[cell][chamber]:
+                present[(base,)] = 1
             for allele in mixed_alleles:
+                if len(allele) == 2:
+                    if (not present[(allele[0],)]) and (not present[(allele[1],)]):
+                        present[allele] = 0
+                    else:
+                        present[allele] = 1
 
-                pr_one_ch[(cell, chamber, allele)] = pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber])
+            not_present_val_one_allele = None
+            not_present_val_two_allele = None
+            
+            for allele in mixed_alleles:
+                
+                if present[allele]:
+                    pr_one_ch[(cell, chamber, allele)] = pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber])
+                
+                elif len(allele) == 1:
+                    if not_present_val_one_allele == None:
+                        not_present_val_one_allele = pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber])
+                    
+                    #assert(not_present_val_one_allele == pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber]))
+                    pr_one_ch[(cell, chamber, allele)] = not_present_val_one_allele
+                elif len(allele) == 2:
+                    if not_present_val_two_allele == None:
+                        not_present_val_two_allele = pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber])
+                    
+                    #assert(not_present_val_two_allele == pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber]))
+                    pr_one_ch[(cell, chamber, allele)] = not_present_val_two_allele
 
     return pr_one_ch
 
@@ -287,7 +328,7 @@ def pr_all_chamber_data(allele, ref_allele, cell, chamber, pr_one_ch, nonzero_ch
     p_total = -1e50
     for G in genotypes:
 
-        configs = deepcopy(hom_het_configs[0]) if G[0] == G[1] else deepcopy(hom_het_configs[1])
+        configs = copy.copy(hom_het_configs[0]) if G[0] == G[1] else copy.copy(hom_het_configs[1])
 
         for config in configs:
             p = genotype_priors[ref_allele][G]
@@ -405,9 +446,12 @@ def call_chamber_alleles(input_file, output_file):
 
                     bd = str.upper(re.sub(r'\^.|\$', '', el[col_ix + 1]))
                     bd = re.sub(r'\.|\,', ref_base, bd)
-                    qd = [((ord(q) - 33) * -0.1) for q in el[col_ix + 2]]
-
-                    bd, qd = zip(*[(b,q) for b,q in zip(bd,qd) if b not in ['>','<','*']])
+                    qd = [10**((ord(q) - 33) * -0.1) for q in el[col_ix + 2]]
+                    paired_bd_qd = [(b,q) for b,q in zip(bd,qd) if b not in ['>','<','*']]
+                    if len(paired_bd_qd) < coverage_cut:
+                        continue
+                    
+                    bd, qd = zip(*paired_bd_qd)
 
                     assert(len(bd) == len(qd))
 
@@ -436,7 +480,7 @@ def call_chamber_alleles(input_file, output_file):
 
                         outline_el[cell*n_chambers + chamber] = out_str
 
-            outline_el = [chrom, str(pos+1)] + outline_el
+            outline_el = [chrom, str(pos+1), ref_base] + outline_el
             tag_info = ';'.join(tags) if tags != [] else 'N/A'
             outline_el.append(tag_info)
             outline = '\t'.join(outline_el)
