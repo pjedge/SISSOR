@@ -82,7 +82,7 @@ rule call_alleles:
     output: 'output/split/{r}.out'
     run:
         import call_chamber_alleles as cca
-        cca.call_chamber_alleles(input[0], output[0])
+        cca.call_chamber_alleles(input[0], output[0], SNPs_only=True)
 
 rule estimate_parameters:
     params: job_name = 'estimate_parameters'
