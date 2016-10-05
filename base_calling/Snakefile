@@ -8,10 +8,7 @@ localrules: all, simlinks
 
 rule all:
     input:
-        'output/chamber_allele_calls.out'
-        #'output/split/chr1.80000001.85000000.out'
-        #'parameters/chrX_covs.p'
-        #expand('pileups/split/{r}.pileup',r=regions)
+        'output/chamber_allele_calls.SNPs_only.out'
 
 samples = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
@@ -27,8 +24,6 @@ PGP1_21_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/BAM'
 PGP1_22_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/previous/BAM'
 PGP1_A1_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/HiSeqCombinedBAM'
 
-hg19_size_list = [('chr1', 249250621)]
-'''
 hg19_size_list = [('chr1', 249250621),
  ('chr2', 243199373),
  ('chr3', 198022430),
@@ -53,7 +48,7 @@ hg19_size_list = [('chr1', 249250621),
  ('chr22', 51304566),
  ('chrX', 155270560),
  ('chrY', 59373566)]
-'''
+
 # create chunks of hg19
 # return list of (chrom,start,stop) tuples. stop is inclusive
 chunklist = []
@@ -63,12 +58,11 @@ for chrom, chrlen in hg19_size_list:
         chunklist.append((chrom,start,end))
 
 regions = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in chunklist]
-#regions = regions[50:51]  # test sample
 
 rule combine_base_calls:
     params: job_name = 'combine_base_calls'
-    input:  expand('output/split/{r}.out',r=regions)
-    output: 'output/chamber_allele_calls.out'
+    input:  expand('output/split/{r}.SNPs_only.out',r=regions)
+    output: 'output/chamber_allele_calls.SNPs_only.out'
     shell: 'cat {input} > {output}'
 
 rule call_alleles:
@@ -81,7 +75,7 @@ rule call_alleles:
             'parameters/het_config_probs.p',
             'parameters/genotype_priors.p',
             'parameters/omega.p'
-    output: 'output/split/{r}.out'
+    output: 'output/split/{r}.SNPs_only.out'
     run:
         import call_chamber_alleles as cca
         cca.call_chamber_alleles(input[0], output[0], SNPs_only=True)

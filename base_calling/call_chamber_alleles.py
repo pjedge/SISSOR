@@ -100,6 +100,8 @@ genotypes = list(itertools.combinations_with_replacement(bases,2))
 parameters_dir = 'parameters'
 n_cells = 3
 alleles = ['A','T','G','C']
+numbers = '0123456789'
+base_letters = 'ACGTacgt'
 mixed_alleles = list(set([tuple(sorted(list(set(x)))) for x in itertools.product(alleles,alleles)]))
 
 ###############################################################################
@@ -234,14 +236,14 @@ def compute_caches():
                     for a2_match in [False,True]:
                         qual = 10**((q - 33) * -0.1)
                         frac = i / j if i > 1 else 1e-10
-                    
+
                         x1 = (1.0-qual)*(1.0-omega_nolog) + omega_nolog*qual
                         x2 = omega_nolog*(1.0-qual) + (1-omega_nolog)*qual
                         p1 = x1 if a1_match else x2
                         p2 = x1 if a2_match else x2
                         two_allele_cache[((i / j),qual,a1_match,a2_match)] = log10(frac*p1 + (1-frac)*p2)
 
-                        
+
     for q in range(33,130):
         qual = 10**((q - 33) * -0.1)
 
@@ -276,10 +278,10 @@ def pr_one_chamber_data(alleles_present, base_data, qual_data):
 def precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers):
 
     pr_one_ch = dict()
-    
+
     for cell in range(n_cells):
         for chamber in nonzero_chambers[cell]:
-            
+
             # for alleles that are not present at all in the data, the probability of seeing
             # them should be exactly the same.
             present = dict()
@@ -296,22 +298,22 @@ def precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers):
 
             not_present_val_one_allele = None
             not_present_val_two_allele = None
-            
+
             for allele in mixed_alleles:
-                
+
                 if present[allele]:
                     pr_one_ch[(cell, chamber, allele)] = pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber])
-                
+
                 elif len(allele) == 1:
                     if not_present_val_one_allele == None:
                         not_present_val_one_allele = pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber])
-                    
+
                     #assert(not_present_val_one_allele == pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber]))
                     pr_one_ch[(cell, chamber, allele)] = not_present_val_one_allele
                 elif len(allele) == 2:
                     if not_present_val_two_allele == None:
                         not_present_val_two_allele = pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber])
-                    
+
                     #assert(not_present_val_two_allele == pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber]))
                     pr_one_ch[(cell, chamber, allele)] = not_present_val_two_allele
 
@@ -433,7 +435,7 @@ def call_chamber_alleles(input_file, output_file, SNPs_only=True):
             assert(ref_base in bases)
 
             total_nonref = 0
-            
+
             for cell_num in range(n_cells):
                 for ch_num in range(n_chambers):
 
@@ -448,32 +450,70 @@ def call_chamber_alleles(input_file, output_file, SNPs_only=True):
                     nonzero_chambers[cell_num].append(ch_num)
                     nonzero_chamber_count += 1
 
-                    bd = str.upper(re.sub(r'\^.|\$|\+[0-9]+[ACGTNacgtn]+|-[0-9]+[ACGTNacgtn]+', '', el[col_ix + 1]))
-                    bd = re.sub(r'\.|\,', ref_base, bd)
-                    qd = [10**((ord(q) - 33) * -0.1) for q in el[col_ix + 2]]
+                    #bd = str.upper(re.sub(r'\^.|\$|\+[0-9]+[ACGTNacgtn]+|-[0-9]+[ACGTNacgtn]+', '', el[col_ix + 1]))
+                    raw_bd = el[col_ix + 1]
+                    raw_qd = el[col_ix + 2]
+
+                    i = 0   # index for base data
+                    j = 0   # index for qual data
+                    bd = [] # base data
+                    qd = [] # qual data
+                    try:
+                        while i < len(raw_bd):
+                            if raw_bd[i] == '.' or raw_bd[i] == ',': # reference base call
+                                bd.append(ref_base)
+                                qd.append(10**((ord(raw_qd[j]) - 33) * -0.1))
+                                i += 1
+                                j += 1
+                            elif raw_bd[i] in base_letters:
+                                bd.append(str.upper(raw_bd[i]))
+                                qd.append(10**((ord(raw_qd[j]) - 33) * -0.1))
+                                i += 1
+                                j += 1
+                            elif raw_bd[i] == '+' or raw_bd[i] == '-':            # indel
+                                num = int(raw_bd[i+1])
+                                i += 2
+                                while(raw_bd[i] in numbers):
+                                    num *= 10
+                                    num += int(raw_bd[i])
+                                    i += 1
+                                i += num
+                            elif raw_bd[i] == '^':
+                                i += 2
+                            elif raw_bd[i] == '$':
+                                i += 1
+                            elif raw_bd[i] in '><*':                 # reference skip or deletion
+                                i += 1
+                                j += 1
+                    except:
+                        print(line)
+                        exit(0)
+
+
+                    assert(i == len(raw_bd))
+                    assert(j == len(raw_qd))
                     assert(len(bd) == len(qd))
-                    assert(len(bd) == depth)
-
-                    paired_bd_qd = [(b,q) for b,q in zip(bd,qd) if b not in ['>','<','*']]
-                    if len(paired_bd_qd) < coverage_cut:
-                        continue
-    
-                    bd, qd = zip(*paired_bd_qd)
-
-
-                    base_data[cell_num][ch_num] = bd[:max_cov]
-                    qual_data[cell_num][ch_num] = qd[:max_cov]
 
                     for b in bd:
                         assert(b in bases)
                         if b != ref_base:
                             total_nonref += 1
-            
+
+                    if len(bd) != len(qd):
+                        print(line,file=opf,end='')
+                        continue
+
+                    if len(bd) < coverage_cut:
+                        continue
+
+                    base_data[cell_num][ch_num] = bd[:max_cov]
+                    qual_data[cell_num][ch_num] = qd[:max_cov]
+
             if SNPs_only and total_nonref < min_nonref:
                 continue
-            
+
             continue
-            
+
             outline_el = ['*']*(n_chambers*n_cells)
 
             too_many_chambers = False
