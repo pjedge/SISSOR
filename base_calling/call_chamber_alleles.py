@@ -449,7 +449,7 @@ def call_chamber_alleles(input_file, output_file, SNPs_only=True):
                     raw_bd = el[col_ix + 1]
                     raw_qd = el[col_ix + 2]
 
-                    bd, qd = parse_mpileup_base_qual(raw_bd, raw_qd)
+                    bd, qd = parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
 
                     for b in bd:
                         if b != ref_base:
