@@ -84,6 +84,49 @@ def remove_multiple_strings(cur_string, replace_list):  # credit to http://stack
     cur_string = cur_string.replace(cur_word, '')
   return cur_string
 
+def parse_mpileup_base_qual(raw_bd, raw_qd, ref_base):
+
+    i = 0   # index for base data
+    j = 0   # index for qual data
+    bd = [] # base data
+    qd = [] # qual data
+
+    while i < len(raw_bd):
+        if raw_bd[i] == '.' or raw_bd[i] == ',': # reference base call
+            bd.append(ref_base)
+            qd.append(10**((ord(raw_qd[j]) - 33) * -0.1))
+            i += 1
+            j += 1
+        elif raw_bd[i] in base_letters:
+            bd.append(str.upper(raw_bd[i]))
+            qd.append(10**((ord(raw_qd[j]) - 33) * -0.1))
+            i += 1
+            j += 1
+        elif raw_bd[i] == '+' or raw_bd[i] == '-':            # indel
+            num = int(raw_bd[i+1])
+            i += 2
+            while(raw_bd[i] in numbers):
+                num *= 10
+                num += int(raw_bd[i])
+                i += 1
+            i += num
+        elif raw_bd[i] == '^':
+            i += 2
+        elif raw_bd[i] == '$':
+            i += 1
+        elif raw_bd[i] in '><*':                 # reference skip or deletion
+            i += 1
+            j += 1
+
+    assert(i == len(raw_bd))
+    assert(j == len(raw_qd))
+    assert(len(bd) == len(qd))
+
+    for b in bd:
+        assert(b in bases)
+
+    return bd, qd
+
 ###############################################################################
 # CONSTANTS
 ###############################################################################
@@ -450,58 +493,14 @@ def call_chamber_alleles(input_file, output_file, SNPs_only=True):
                     nonzero_chambers[cell_num].append(ch_num)
                     nonzero_chamber_count += 1
 
-                    #bd = str.upper(re.sub(r'\^.|\$|\+[0-9]+[ACGTNacgtn]+|-[0-9]+[ACGTNacgtn]+', '', el[col_ix + 1]))
                     raw_bd = el[col_ix + 1]
                     raw_qd = el[col_ix + 2]
 
-                    i = 0   # index for base data
-                    j = 0   # index for qual data
-                    bd = [] # base data
-                    qd = [] # qual data
-                    try:
-                        while i < len(raw_bd):
-                            if raw_bd[i] == '.' or raw_bd[i] == ',': # reference base call
-                                bd.append(ref_base)
-                                qd.append(10**((ord(raw_qd[j]) - 33) * -0.1))
-                                i += 1
-                                j += 1
-                            elif raw_bd[i] in base_letters:
-                                bd.append(str.upper(raw_bd[i]))
-                                qd.append(10**((ord(raw_qd[j]) - 33) * -0.1))
-                                i += 1
-                                j += 1
-                            elif raw_bd[i] == '+' or raw_bd[i] == '-':            # indel
-                                num = int(raw_bd[i+1])
-                                i += 2
-                                while(raw_bd[i] in numbers):
-                                    num *= 10
-                                    num += int(raw_bd[i])
-                                    i += 1
-                                i += num
-                            elif raw_bd[i] == '^':
-                                i += 2
-                            elif raw_bd[i] == '$':
-                                i += 1
-                            elif raw_bd[i] in '><*':                 # reference skip or deletion
-                                i += 1
-                                j += 1
-                    except:
-                        print(line)
-                        exit(0)
-
-
-                    assert(i == len(raw_bd))
-                    assert(j == len(raw_qd))
-                    assert(len(bd) == len(qd))
+                    bd, qd = parse_mpileup_base_qual(raw_bd, raw_qd)
 
                     for b in bd:
-                        assert(b in bases)
                         if b != ref_base:
                             total_nonref += 1
-
-                    if len(bd) != len(qd):
-                        print(line,file=opf,end='')
-                        continue
 
                     if len(bd) < coverage_cut:
                         continue
@@ -511,8 +510,6 @@ def call_chamber_alleles(input_file, output_file, SNPs_only=True):
 
             if SNPs_only and total_nonref < min_nonref:
                 continue
-
-            continue
 
             outline_el = ['*']*(n_chambers*n_cells)
 
