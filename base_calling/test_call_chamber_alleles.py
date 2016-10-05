@@ -12,57 +12,6 @@ import unittest
 import call_chamber_alleles as cca
 from math import log10
 
-class test_safenext(unittest.TestCase):
-
-    def test1(self):
-        lst = [1,2,3,4,5]
-        it  = iter(lst)
-
-        cur = cca.safenext(it)
-        i = 0
-        while(cur):
-            self.assertEqual(cur,lst[i])
-            cur = cca.safenext(it)
-            i += 1
-
-
-class test_format_chrom(unittest.TestCase):
-
-    def test1(self):
-        chrnum = '1'
-        self.assertEqual(cca.format_chrom(chrnum),'chr1')
-
-    def test1rev(self):
-        chrnum = 'chr1'
-        self.assertEqual(cca.format_chrom(chrnum),'chr1')
-
-    def testX(self):
-        chrnum = 'X'
-        self.assertEqual(cca.format_chrom(chrnum),'chrX')
-
-    def testXrev(self):
-        chrnum = 'chrX'
-        self.assertEqual(cca.format_chrom(chrnum),'chrX')
-
-
-class test_prod(unittest.TestCase):
-
-    def test1(self):
-        lst = [4,5]
-        self.assertEqual(cca.prod(lst),20)
-
-    def test2(self):
-        lst = [1,2,3,4,5]
-        self.assertEqual(cca.prod(lst),120)
-
-    def test3(self):
-        lst = [0.5,0.5,0.2,0.2,0.1]
-        self.assertAlmostEqual(cca.prod(lst),0.001)
-
-    def test4(self):
-        chrnum = 'chrX'
-        self.assertEqual(cca.format_chrom(chrnum),'chrX')
-
 class test_addlogs(unittest.TestCase):
 
     def f(self, p1, p2):
@@ -84,59 +33,6 @@ class test_addlogs(unittest.TestCase):
 
     def test5(self):
         self.f(0.01,0.232823832)
-
-
-class test_subtractlogs(unittest.TestCase):
-
-    def f(self, p1, p2):
-        p3 = log10(p1 - p2)
-        res = cca.subtractlogs(log10(p1),log10(p2))
-        self.assertAlmostEqual(p3, res)
-
-    def test1(self):
-        self.f(0.001,0.000001)
-
-    def test2(self):
-        self.f(0.001,1e-10)
-
-    def test3(self):
-        self.f(0.001,1e-20)
-
-    def test4(self):
-        self.f(20,10)
-
-    def test5(self):
-        self.f(1,0.5)
-
-class test_remove_substrings(unittest.TestCase):
-
-    def test1(self):
-        cur_string = 'she sells sea shells by the sea shore'
-        replace_list = ['se','ore','by']
-        expected_result = 'she lls a shells  the a sh'
-        res = cca.remove_multiple_strings(cur_string, replace_list)
-        self.assertEqual(expected_result, res)
-
-    def test2(self):
-        cur_string = 'she sells sea shells by the sea shore'
-        replace_list = []
-        expected_result = 'she sells sea shells by the sea shore'
-        res = cca.remove_multiple_strings(cur_string, replace_list)
-        self.assertEqual(expected_result, res)
-
-    def test3(self):
-        cur_string = 'she sells sea shells by the sea shore'
-        replace_list = ['se']
-        expected_result = 'she lls a shells by the a shore'
-        res = cca.remove_multiple_strings(cur_string, replace_list)
-        self.assertEqual(expected_result, res)
-
-    def test4(self):
-        cur_string = 'blahblahblahblahblather'
-        replace_list = ['blather','blah']
-        expected_result = ''
-        res = cca.remove_multiple_strings(cur_string, replace_list)
-        self.assertEqual(expected_result, res)
 
 class test_hom_het_config_probs(unittest.TestCase):
 
@@ -163,12 +59,159 @@ class test_singlecell_config(unittest.TestCase):
         cfg = cca.singlecell_config(1,[24])
         self.assertTrue(len(cfg) == 1)
 
+F = 0.00019952623149688788 # value corresponing to phred F value
+
+class test_parse_mpileup_base_qual(unittest.TestCase):
+
+    def test0(self):
+        raw_bd = '..,+2AA,,'
+        raw_qd = 'FFFFF'
+        ref_base = 'C'
+        bd_exp = list('CCCCC')
+        qd_exp = [F]*5
+        bd, qd = cca.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+        self.assertEqual(bd, bd_exp)
+        self.assertEqual(qd, qd_exp)
+
+    def test1(self):
+        raw_bd = '..,,,+2AA'
+        raw_qd = 'FFFFF'
+        ref_base = 'C'
+        bd_exp = list('CCCCC')
+        qd_exp = [F]*5
+        bd, qd = cca.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+        self.assertEqual(bd, bd_exp)
+        self.assertEqual(qd, qd_exp)
+        
+    def test2(self):
+        raw_bd = '..,,,+25AAAAAAAAAAAAAAAAAAAAAAAAA'
+        raw_qd = 'FFFFF'
+        ref_base = 'G'
+        bd_exp = list('GGGGG')
+        qd_exp = [F]*5
+        bd, qd = cca.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+        self.assertEqual(bd, bd_exp)
+        self.assertEqual(qd, qd_exp)
+        
+    def test3(self):
+        raw_bd = '+25AAAAAAAAAAAAAAAAAAAAAAAAA..,,,'
+        raw_qd = 'FFFFF'
+        ref_base = 'C'
+        bd_exp = list('CCCCC')
+        qd_exp = [F]*5
+        bd, qd = cca.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+        self.assertEqual(bd, bd_exp)
+        self.assertEqual(qd, qd_exp)
+        
+
+    def test4(self):
+        raw_bd = '..,-2AA,,'
+        raw_qd = 'FFFFF'
+        ref_base = 'A'
+        bd_exp = list('AAAAA')
+        qd_exp = [F]*5
+        bd, qd = cca.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+        self.assertEqual(bd, bd_exp)
+        self.assertEqual(qd, qd_exp)
+
+    def test5(self):
+        raw_bd = '..,,,-2AA'
+        raw_qd = 'FFFFF'
+        ref_base = 'C'
+        bd_exp = list('CCCCC')
+        qd_exp = [F]*5
+        bd, qd = cca.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+        self.assertEqual(bd, bd_exp)
+        self.assertEqual(qd, qd_exp)
+        
+    def test6(self):
+        raw_bd = '..,,,-25AAAAAAAAAAAAAAAAAAAAAAAAA'
+        raw_qd = 'FFFFF'
+        ref_base = 'C'
+        bd_exp = list('CCCCC')
+        qd_exp = [F]*5
+        bd, qd = cca.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+        self.assertEqual(bd, bd_exp)
+        self.assertEqual(qd, qd_exp)
+        
+    def test7(self):
+        raw_bd = '-25AAAAAAAAAAAAAAAAAAAAAAAAA..,,,'
+        raw_qd = 'FFFFF'
+        ref_base = 'C'
+        bd_exp = list('CCCCC')
+        qd_exp = [F]*5
+        bd, qd = cca.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+        self.assertEqual(bd, bd_exp)
+        self.assertEqual(qd, qd_exp)
+        
+    def test8(self):
+        raw_bd = 'AAaaA'
+        raw_qd = '!!!!!'
+        ref_base = 'C'
+        bd_exp = list('AAAAA')
+        qd_exp = [1.0]*5
+        bd, qd = cca.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+        self.assertEqual(bd, bd_exp)
+        self.assertEqual(qd, qd_exp)
+        
+    def test9(self):
+        raw_bd = 'A.,aA'
+        raw_qd = 'FFFFF'
+        ref_base = 'C'
+        bd_exp = list('ACCAA')
+        qd_exp = [F]*5
+        bd, qd = cca.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+        self.assertEqual(bd, bd_exp)
+        self.assertEqual(qd, qd_exp)
+        
+    def test10(self):
+        raw_bd = 'A.,aA'
+        raw_qd = 'FFFFF'
+        ref_base = 'C'
+        bd_exp = list('ACCAA')
+        qd_exp = [F]*5
+        bd, qd = cca.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+        self.assertEqual(bd, bd_exp)
+        self.assertEqual(qd, qd_exp)
+        
+    def test11(self):
+        raw_bd = 'A.,$$^.AA'
+        raw_qd = 'FFFFF'
+        ref_base = 'C'
+        bd_exp = list('ACCAA')
+        qd_exp = [F]*5
+        bd, qd = cca.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+        self.assertEqual(bd, bd_exp)
+        self.assertEqual(qd, qd_exp)
+     
+    def test12(self):
+        raw_bd = '..$$$$^C,,,-25AAAAAAAAAAAAAAAAAAAAAAAAA'
+        raw_qd = '!!!!!'
+        ref_base = 'C'
+        bd_exp = list('CCCCC')
+        qd_exp = [1.0]*5
+        bd, qd = cca.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+        self.assertEqual(bd, bd_exp)
+        self.assertEqual(qd, qd_exp)
+ 
+    def test13(self):
+        raw_bd = '.*..<>..'
+        raw_qd = 'F!FF!!FF'
+        ref_base = 'C'
+        bd_exp = list('CCCCC')
+        qd_exp = [F]*5
+        bd, qd = cca.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+        self.assertEqual(bd, bd_exp)
+        self.assertEqual(qd, qd_exp)                       
+    
+###########################################################################
+# TODO
+###########################################################################
 
 class test_multicell_config(unittest.TestCase):
 
     def test1(self):
         self.assertTrue(True)
-
 
 class test_compute_mixed_allele_priors(unittest.TestCase):
 

@@ -8,8 +8,6 @@ Created on Wed Sep 21 14:51:49 2016
 
 import pickle
 import os
-#import sys
-#from collections import defaultdict
 import itertools
 from math import log10, factorial
 from functools import reduce
@@ -18,11 +16,10 @@ from pdb import set_trace
 from collections import defaultdict
 import random
 import bisect
+from call_chamber_alleles import addlogs
 import math
 if False:
     set_trace() # to dodge warnings that pdb isn't being used.
-#from copy import deepcopy
-#import sys
 
 desc = 'Use cross-chamber information to call chamber alleles in SISSOR data'
 
@@ -32,7 +29,6 @@ default_output_dir = 'parameters'
 # CONSTANTS
 ###############################################################################
 
-sample_rate = 0.001
 chroms = ['chr{}'.format(i) for i in range(1,23)] + ['chrX','chrY']
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 n_chambers = 24
@@ -43,51 +39,13 @@ het_snp_rate = 0.0005
 hom_snp_rate = 0.001
 n_cells = 3
 
-short_chrom_names = set([str(x) for x in range(1,23)]+['X','Y'])
-chrom_names = set(['chr'+str(x) for x in range(1,23)]+['chrX','chrY'])
-
 ###############################################################################
 # HELPER FUNCTIONS
 ###############################################################################
 
-# next function that returns 0 instead of raising StopIteration
-# this is convenient for iterating over file 2 at a time
-def safenext(iterator):
-    try:
-        nextval = next(iterator)
-        return nextval
-    except StopIteration:
-        return 0
-
-def format_chrom(chrom_str):
-    if chrom_str in short_chrom_names:
-        chrom_str = 'chr' + chrom_str
-    assert(chrom_str in chrom_names)
-    return chrom_str
-
 # product of list
 def prod(iterable): # credit to: http://stackoverflow.com/questions/7948291/is-there-a-built-in-product-in-python
     return reduce(operator.mul, iterable, 1)
-
-# sum of two probabilities that are in log form
-def addlogs(a,b):
-    if a > b:
-        return a + log10(1 + pow(10, b - a))
-    else:
-        return b + log10(1 + pow(10, a - b))
-
-# difference of two probabilities that are in log form
-def subtractlogs(a,b):
-    if a > b:
-        return a + log10(1 - pow(10, b - a))
-    else:
-        return b + log10(1 - pow(10, a - b))
-
-def remove_multiple_strings(cur_string, replace_list):  # credit to http://stackoverflow.com/questions/30606124/most-efficient-way-to-remove-multiple-substrings-from-string
-  for cur_word in replace_list:
-    cur_string = cur_string.replace(cur_word, '')
-  return cur_string
-
 
 # credit to David for this function: http://stackoverflow.com/questions/526255/probability-distribution-in-python
 def weighted_choice_bisect_compile(items):
@@ -185,15 +143,6 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
 
     for i in range(lim,2000):
         assert(len(cov_frac_dist[i]) == lim)
-    '''
-    for i in range(1,200,10):
-        plt.figure()
-        y = cov_frac_dist[i]
-        x = list(range(len(cov_frac_dist[i])))
-        plt.plot(x,y)
-        plt.title(str(i))
-    '''
-
 
     total_position_counts = sum([chamber_position_counts[chamber] for chamber in range(0,24)])
     chamber_proportions = [chamber_position_counts[chamber]/total_position_counts for chamber in range(0,24)]

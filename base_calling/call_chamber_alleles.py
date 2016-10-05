@@ -4,9 +4,6 @@ import argparse
 #from collections import defaultdict
 import itertools
 from math import log10
-from functools import reduce
-import operator
-import re
 from pdb import set_trace
 if False:
     set_trace() # to dodge warnings that pdb isn't being used.
@@ -15,7 +12,7 @@ import pickle
 import copy
 #import sys
 #from matplotlib import pyplot as plt
-desc = 'Use cross-chamber information to call chamber alleles in SISSOR data'
+desc = 'Use cross-chamber inpormation to call chamber alleles in SISSOR data'
 
 default_input_file = 'test_subsample.txt'
 default_output_file = 'output_calls.txt'
@@ -29,104 +26,17 @@ def parseargs():
     parser = argparse.ArgumentParser(description=desc)
     parser.add_argument('-i', '--input_file', nargs='?', type = str, help='input file, pileup with 3 cells x 24 chambers', default=default_input_file)
     parser.add_argument('-o', '--output_file', nargs='?', type = str, help='file to write output to', default=default_output_file)
-    #parser.add_argument('-r', '--region', nargs='?', type = str, help='region to process in format {CHR}:{START}-{END} to process (END excluded)', default=None)
-
-    # default to help option. credit to unutbu: http://stackoverflow.com/questions/4042452/display-help-message-with-python-argparse-when-script-is-called-without-any-argu
-    #if len(sys.argv) <= 1:
-    #    parser.print_help()
-    #    sys.exit(1)
 
     args = parser.parse_args()
     return args
 
-###############################################################################
-# HELPER FUNCTIONS
-###############################################################################
-
-# next function that returns 0 instead of raising StopIteration
-# this is convenient for iterating over file 2 at a time
-def safenext(iterator):
-    try:
-        nextval = next(iterator)
-        return nextval
-    except StopIteration:
-        return 0
-
-short_chrom_names = set([str(x) for x in range(1,23)]+['X','Y'])
-chrom_names = set(['chr'+str(x) for x in range(1,23)]+['chrX','chrY'])
-
-def format_chrom(chrom_str):
-    if chrom_str in short_chrom_names:
-        chrom_str = 'chr' + chrom_str
-    assert(chrom_str in chrom_names)
-    return chrom_str
-
-# product of list
-def prod(iterable): # credit to: http://stackoverflow.com/questions/7948291/is-there-a-built-in-product-in-python
-    return reduce(operator.mul, iterable, 1)
-
-# sum of two probabilities that are in log form
 def addlogs(a,b):
     if a > b:
         return a + log10(1 + pow(10, b - a))
     else:
         return b + log10(1 + pow(10, a - b))
 
-# difference of two probabilities that are in log form
-def subtractlogs(a,b):
-    if a > b:
-        return a + log10(1 - pow(10, b - a))
-    else:
-        return b + log10(1 - pow(10, a - b))
-
-def remove_multiple_strings(cur_string, replace_list):  # credit to http://stackoverflow.com/questions/30606124/most-efficient-way-to-remove-multiple-substrings-from-string
-  for cur_word in replace_list:
-    cur_string = cur_string.replace(cur_word, '')
-  return cur_string
-
-def parse_mpileup_base_qual(raw_bd, raw_qd, ref_base):
-
-    i = 0   # index for base data
-    j = 0   # index for qual data
-    bd = [] # base data
-    qd = [] # qual data
-
-    while i < len(raw_bd):
-        if raw_bd[i] == '.' or raw_bd[i] == ',': # reference base call
-            bd.append(ref_base)
-            qd.append(10**((ord(raw_qd[j]) - 33) * -0.1))
-            i += 1
-            j += 1
-        elif raw_bd[i] in base_letters:
-            bd.append(str.upper(raw_bd[i]))
-            qd.append(10**((ord(raw_qd[j]) - 33) * -0.1))
-            i += 1
-            j += 1
-        elif raw_bd[i] == '+' or raw_bd[i] == '-':            # indel
-            num = int(raw_bd[i+1])
-            i += 2
-            while(raw_bd[i] in numbers):
-                num *= 10
-                num += int(raw_bd[i])
-                i += 1
-            i += num
-        elif raw_bd[i] == '^':
-            i += 2
-        elif raw_bd[i] == '$':
-            i += 1
-        elif raw_bd[i] in '><*':                 # reference skip or deletion
-            i += 1
-            j += 1
-
-    assert(i == len(raw_bd))
-    assert(j == len(raw_qd))
-    assert(len(bd) == len(qd))
-
-    for b in bd:
-        assert(b in bases)
-
-    return bd, qd
-
+    
 ###############################################################################
 # CONSTANTS
 ###############################################################################
@@ -150,8 +60,6 @@ mixed_alleles = list(set([tuple(sorted(list(set(x)))) for x in itertools.product
 ###############################################################################
 # LOAD PARAMETERS
 ###############################################################################
-
-
 
 p_null = pickle.load(open("{}/p_null.p".format(parameters_dir), "rb" )) # estimated p_null, the probability of a strand not being sampled.
 ch_priors = pickle.load(open("{}/ch_priors.p".format(parameters_dir), "rb" )) # prior probability of sampling from a chamber
@@ -453,6 +361,51 @@ def pr_allele(cell, chamber, pr_one_ch, nonzero_chambers, mixed_allele_priors, r
 ###############################################################################
 # MAIN FUNCTION AND PARSING
 ###############################################################################
+
+
+def parse_mpileup_base_qual(raw_bd, raw_qd, ref_base):
+
+    i = 0   # index for base data
+    j = 0   # index for qual data
+    bd = [] # base data
+    qd = [] # qual data
+
+    while i < len(raw_bd):
+        if raw_bd[i] == '.' or raw_bd[i] == ',':   # reference base call
+            bd.append(ref_base)
+            qd.append(10**((ord(raw_qd[j]) - 33) * -0.1))
+            i += 1
+            j += 1
+        elif raw_bd[i] in base_letters:            # variant call
+            bd.append(str.upper(raw_bd[i]))
+            qd.append(10**((ord(raw_qd[j]) - 33) * -0.1))
+            i += 1
+            j += 1
+        elif raw_bd[i] == '+' or raw_bd[i] == '-': # indel
+            num = int(raw_bd[i+1])
+            i += 2
+            while(raw_bd[i] in numbers):
+                num *= 10
+                num += int(raw_bd[i])
+                i += 1
+            i += num
+        elif raw_bd[i] == '^':
+            i += 2
+        elif raw_bd[i] == '$':
+            i += 1
+        elif raw_bd[i] in '><*':                 # reference skip or deletion
+            i += 1
+            j += 1
+
+    assert(i == len(raw_bd))
+    assert(j == len(raw_qd))
+    assert(len(bd) == len(qd))
+
+    for b in bd:
+        assert(b in bases)
+
+    return bd, qd
+    
 
 def call_chamber_alleles(input_file, output_file, SNPs_only=True):
 
