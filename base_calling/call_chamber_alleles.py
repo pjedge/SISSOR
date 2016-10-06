@@ -10,13 +10,13 @@ if False:
 import time
 import re
 import pickle
-import copy
+#import copy
 #import sys
 #from matplotlib import pyplot as plt
 desc = 'Use cross-chamber inpormation to call chamber alleles in SISSOR data'
 
-default_input_file = 'test_subsample.txt'
-default_output_file = 'output_calls.txt'
+default_input_file = 'weird_calls.pileup'
+default_output_file = 'weird_calls.new.out'
 
 ###############################################################################
 # PARSE STDIN
@@ -36,8 +36,7 @@ def addlogs(a,b):
         return a + log10(1 + pow(10, b - a))
     else:
         return b + log10(1 + pow(10, a - b))
-
-    
+   
 ###############################################################################
 # CONSTANTS
 ###############################################################################
@@ -53,10 +52,10 @@ bases = ['A','T','G','C']
 genotypes = list(itertools.combinations_with_replacement(bases,2))
 parameters_dir = 'parameters'
 n_cells = 3
-alleles = ['A','T','G','C']
 numbers = '0123456789'
 base_letters = 'ACGTacgt'
-mixed_alleles = list(set([tuple(sorted(list(set(x)))) for x in itertools.product(alleles,alleles)]))
+mixed_alleles = [('A',),('T',),('G',),('C',), ('A', 'T'),('A', 'G'),('A', 'C'),('T', 'G'),('T', 'C'),('G', 'C')]
+tinylog = -1e5
 
 ###############################################################################
 # LOAD PARAMETERS
@@ -89,7 +88,20 @@ def singlecell_config(het,nonzero_chambers):
             continue
 
         # c1..c4 represent the chamber placements of strands 1..4
-        sl = tuple(sorted([c1,c2,c3,c4]))
+        if het:
+            if c1 > c2:
+                temp = c1
+                c1 = c2
+                c2 = temp
+
+            if c3 > c4:
+                temp = c3
+                c3 = c4
+                c4 = temp
+            sl = (c1,c2,c3,c4)
+        else:
+            sl = tuple(sorted([c1,c2,c3,c4]))
+
         if (not het and sl not in hom_config_probs) or (het and sl not in het_config_probs):
             raise Exception('Strand configuration not in config_probs dictionary')
 
@@ -127,7 +139,7 @@ def multicell_config(het,nonzero_chambers):
 
     config_sets = [singlecell_config(het,nz) for nz in nonzero_chambers]
 
-    return itertools.product(*config_sets)
+    return list(itertools.product(*config_sets))
 
 ###############################################################################
 # LIKELIHOOD CALCULATIONS
@@ -141,13 +153,13 @@ def compute_mixed_allele_priors():
 
     mixed_allele_priors = dict()
 
-    for ref_allele in alleles:
+    for ref_allele in bases:
 
         mixed_allele_priors[ref_allele] = {1:dict(),2:dict(),3:dict(),4:dict()}
 
         for i in range(1,5):
             for allele in mixed_alleles:
-                mixed_allele_priors[ref_allele][i][allele] = -1e10
+                mixed_allele_priors[ref_allele][i][allele] = tinylog
             for G in genotypes:
                 nz = list(range(i))
                 het = (G[0] != G[1])
@@ -159,17 +171,20 @@ def compute_mixed_allele_priors():
 
                     for j in {c1,c2,c3,c4}:
 
-                        alleles_present = []
-                        if c1 == j:
-                            alleles_present.append(G[0])
-                        if c2 == j:
-                            alleles_present.append(G[0])
-                        if c3 == j:
-                            alleles_present.append(G[1])
-                        if c4 == j:
-                            alleles_present.append(G[1])
-
-                        alleles_present = tuple(sorted(list(set(alleles_present))))
+                        G1 = G[0]
+                        G2 = G[1]
+                        G1_present = (c1 == j or c2 == j)
+                        G2_present = (c3 == j or c4 == j)
+                    
+                        if G1_present and G2_present:
+                            if G1 != G2:
+                                alleles_present = G
+                            else:
+                                alleles_present = (G1,)
+                        elif G1_present and not G2_present:
+                            alleles_present = (G1,)
+                        elif G2_present and not G1_present:
+                            alleles_present = (G2,)
 
                         if alleles_present not in mixed_allele_priors[ref_allele][i]:
                             mixed_allele_priors[ref_allele][i][alleles_present] = p
@@ -206,19 +221,20 @@ compute_caches()
 
 def pr_one_chamber_data(alleles_present, base_data, qual_data):
 
-    p = 0
+    
     n = len(base_data)
     assert(n == len(qual_data))
 
     if len(alleles_present) == 1:
-
+        p = 0
         for base,qual in zip(base_data, qual_data):
             p += one_allele_cache[(qual, (alleles_present[0] == base))]
 
     elif len(alleles_present) == 2:
-
+        p = -1e10
         L = len(cov_frac_dist[n])
         for i, p0 in enumerate(cov_frac_dist[n]):
+            p0 = log10(p0) if p0 > 0 else tinylog
             frac = i / L
             for base,qual in zip(base_data, qual_data):
                 p0 += two_allele_cache[(frac, qual, (alleles_present[0] == base), (alleles_present[1] == base))]
@@ -280,29 +296,35 @@ def precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers):
 
 def pr_all_chamber_data(allele, ref_allele, cell, chamber, pr_one_ch, nonzero_chambers, hom_het_configs):
 
-    p_total = None
-    p_total = -1e50
+    p_total = tinylog
+
     for G in genotypes:
-
-        configs = copy.copy(hom_het_configs[0]) if G[0] == G[1] else copy.copy(hom_het_configs[1])
-
+        
+        #configs = copy.copy(hom_het_configs[0]) if G[0] == G[1] else copy.copy(hom_het_configs[1])
+        configs = hom_het_configs[0] if G[0] == G[1] else hom_het_configs[1]
+        
         for config in configs:
+
             p = genotype_priors[ref_allele][G]
 
             (c1,c2,c3,c4), p_cell_cfg = config[cell]
 
-            alleles_present = []
-
-            if c1 == chamber:
-                alleles_present.append(G[0])
-            if c2 == chamber:
-                alleles_present.append(G[0])
-            if c3 == chamber:
-                alleles_present.append(G[1])
-            if c4 == chamber:
-                alleles_present.append(G[1])
-
-            alleles_present = tuple(sorted(list(set(alleles_present))))
+            G1 = G[0]
+            G2 = G[1]
+            G1_present = (c1 == chamber or c2 == chamber)
+            G2_present = (c3 == chamber or c4 == chamber)
+        
+            if G1_present and G2_present:
+                if G1 != G2:
+                    alleles_present = G
+                else:
+                    alleles_present = (G1,)
+            elif G1_present and not G2_present:
+                alleles_present = (G1,)
+            elif G2_present and not G1_present:
+                alleles_present = (G2,)
+            else:
+                alleles_present = None
 
             if alleles_present != allele:
                 continue
@@ -315,23 +337,28 @@ def pr_all_chamber_data(allele, ref_allele, cell, chamber, pr_one_ch, nonzero_ch
                 p += p_cell_cfg
 
                 for j in nonzero_chambers[i]:
-
-                    alleles_present = []
-                    if c1 == j:
-                        alleles_present.append(G[0])
-                    if c2 == j:
-                        alleles_present.append(G[0])
-                    if c3 == j:
-                        alleles_present.append(G[1])
-                    if c4 == j:
-                        alleles_present.append(G[1])
-
-                    alleles_present = tuple(sorted(list(set(alleles_present))))
+                
+                    G1 = G[0]
+                    G2 = G[1]
+                    G1_present = (c1 == j or c2 == j)
+                    G2_present = (c3 == j or c4 == j)
+                
+                    if G1_present and G2_present:
+                        if G1 != G2:
+                            alleles_present = G
+                        else:
+                            alleles_present = (G1,)
+                    elif G1_present and not G2_present:
+                        alleles_present = (G1,)
+                    elif G2_present and not G1_present:
+                        alleles_present = (G2,)
+                    else:
+                        alleles_present = None
 
                     p += pr_one_ch[(i,j,alleles_present)]
-
-            p_total = addlogs(p_total,p) if p_total != None else p
-
+                                   
+            p_total = addlogs(p_total,p)
+            
     return p_total
 
 # probability that allele is present in chamber
@@ -344,16 +371,14 @@ def pr_allele(cell, chamber, pr_one_ch, nonzero_chambers, mixed_allele_priors, r
     hom_het_configs = [multicell_config(False,nonzero_chambers),multicell_config(True,nonzero_chambers)]
 
     for allele in mixed_alleles:
-
         probs.append(pr_all_chamber_data(allele, ref_allele, cell, chamber, pr_one_ch, nonzero_chambers, hom_het_configs) + mixed_allele_priors[ref_allele][num_nonzero][allele])
 
     # denominator for bayes rule posterior calculation
-    total = None
+    total = tinylog
     for p in probs:
-        total = addlogs(total,p) if total != None else p
+        total = addlogs(total,p) 
 
     for a,p in zip(mixed_alleles,probs):
-
         posterior = p - total
         res.append((a,10**posterior))
 
@@ -433,7 +458,7 @@ def parse_mpileup_base_qual(raw_bd, raw_qd, ref_base):
 def call_chamber_alleles(input_file, output_file, SNPs_only=True):
 
     mixed_allele_priors = compute_mixed_allele_priors()
-
+    processed = 0
     with open(input_file,'r') as ipf, open(output_file,'w') as opf:
         for line in ipf:
 
@@ -508,13 +533,14 @@ def call_chamber_alleles(input_file, output_file, SNPs_only=True):
                         out_str = ';'.join(['{}:{}'.format(''.join(a),p) for a,p in res])
 
                         outline_el[cell*n_chambers + chamber] = out_str
-
             outline_el = [chrom, str(pos+1), ref_base] + outline_el
             tag_info = ';'.join(tags) if tags != [] else 'N/A'
             outline_el.append(tag_info)
             outline = '\t'.join(outline_el)
 
             print(outline, file=opf)
+
+            processed += 1
 
 if __name__ == '__main__':
     t1 = time.time()
