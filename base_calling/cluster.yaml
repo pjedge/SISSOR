@@ -6,7 +6,7 @@ __default__:
     qsub_stdout_dir: stdout
     job_name:        snakemake_job
     ppn:             1
-    walltime:        '10:00:00'
+    walltime:        '20:00:00'
 
 call_alleles:
     ppn: 1

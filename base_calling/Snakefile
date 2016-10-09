@@ -3,12 +3,19 @@ import pickle
 import random
 import estimate_parameters
 import fix_sam
+import chamber_allele_call_accuracy as caca
 
 localrules: all, simlinks
 
+# cutoff values are coded as 1.0-10**(-1*x)
+# so 3 => 0.999
+# and 5 => 0.99999
+cutoffs = list(range(3,12))
+
 rule all:
     input:
-        'output/chamber_allele_calls.SNPs_only.out'
+        expand('accuracy_reports/cutoff{cut}.results',cut=cutoffs)
+        #'output/chamber_allele_calls.SNPs_only.out'
 
 samples = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
@@ -20,6 +27,7 @@ chunksize = int(5e6)
 
 SAMTOOLS = '/opt/biotools/samtools/1.3/bin/samtools'
 HG19     = '/oasis/tscc/scratch/pedge/data/genomes/hg19/hg19.fa' #'/home/wkchu/zhang_lab_oasis/resources_v2.8_b37/human_g1k_v37_decoy.fasta'
+CGI_SNPs = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/BAM/ns.gff'
 PGP1_21_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/BAM'
 PGP1_22_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/previous/BAM'
 PGP1_A1_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/HiSeqCombinedBAM'
@@ -58,6 +66,15 @@ for chrom, chrlen in hg19_size_list:
         chunklist.append((chrom,start,end))
 
 regions = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in chunklist]
+
+rule chamber_allele_call_accuracies:
+    params: job_name = 'chamber_allele_call_accuracies.{cut}'
+    input:  ccf = 'output/chamber_allele_calls.SNPs_only.out',
+            gff = CGI_SNPs
+    output: rof = 'accuracy_reports/cutoff{cut}.results',
+            mof = 'accuracy_reports/cutoff{cut}.mismatches'
+    run:
+        caca.chamber_allele_call_accuracy(input.ccf,input.gff,(1.0-10**(-1*x)),output.rof,output.mof)
 
 rule combine_base_calls:
     params: job_name = 'combine_base_calls'
