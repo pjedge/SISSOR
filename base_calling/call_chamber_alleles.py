@@ -15,8 +15,8 @@ import pickle
 #from matplotlib import pyplot as plt
 desc = 'Use cross-chamber inpormation to call chamber alleles in SISSOR data'
 
-default_input_file = 'weird_calls.pileup'
-default_output_file = 'weird_calls.new.out'
+default_input_file = 'test_subsample.txt'
+default_output_file = 'text_subsample.txt'
 
 ###############################################################################
 # PARSE STDIN
