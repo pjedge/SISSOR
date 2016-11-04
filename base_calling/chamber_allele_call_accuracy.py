@@ -8,25 +8,101 @@ Created on Mon Oct  3 18:29:04 2016
 
 # chamber call file has results from SISSOR cross-chamber allele calls
 # GFF file has set of known alleles for individual (for comparison)
+# VCF file has another set of heterozygous SNVs for individual
 # cutoff is the minimum probability of an allele call to use it
 # result outfile simply contains the counts of match vs mismatched alleles
 # mismatch_outfile prints locations of mismatched allele calls
-def chamber_allele_call_accuracy(chamber_call_file, GFF_file, cutoff, result_outfile, mismatch_outfile):
+def chamber_allele_call_accuracy(chamber_call_file, GFF_file, VCF_file, triallelic_file, cutoff, result_outfile, mismatch_outfile):
 
-    with open(chamber_call_file,'r') as ccf, open(GFF_file,'r') as gff, open(result_outfile,'w') as rof, open(mismatch_outfile,'w') as mof:
+    # add heterozygous alleles observed in one CGI dataset to a dictionary
+    cgi_dict = dict()
+    with open(GFF_file,'r') as gff:
+        for line in gff:
+            if line[0] == '#' or len(line) < 3:
+                continue
+            gff_line = line.strip().split('\t')
+            if gff_line[2] != 'SNP':
+                continue
+
+            gff_chrom = gff_line[0]
+            gff_pos   = int(gff_line[3])
+
+            assert(gff_pos == int(gff_line[4]))
+
+            info = gff_line[8].strip().split(';')
+            a_info = info[0]
+            assert('alleles' in a_info)
+            a_info = a_info[8:]
+
+            #r_info = info[2]
+            #assert('ref_allele' in r_info)
+            ref_allele = 'N'#r_info[10:]
+
+            if len(a_info) == 1:
+                #alleles = {a_info}
+                continue
+            elif len(a_info) == 3:
+                alleles = {a_info[0],a_info[2]}
+            else:
+                print("Unexpected number of alleles")
+                assert(False)
+
+            assert(len(alleles) == 2)
+
+            cgi_dict[(gff_chrom,gff_pos)] = alleles
+
+    # add heterozygous SNVs observed in our second CGI dataset to the dictionary
+    with open(VCF_file,'r') as vcf:
+        for line in vcf:
+            if line[0] == '#' or len(line) < 3:
+                continue
+
+            vcf_line = line.strip().split('\t')
+
+            vcf_chrom = vcf_line[0]
+            vcf_pos   = int(vcf_line[1])
+            alleles = {vcf_line[3],vcf_line[4]}
+
+            if (vcf_chrom,vcf_pos) in cgi_dict:
+                if cgi_dict[(vcf_chrom,vcf_pos)] != alleles:
+                    continue # vcf data doesn't match GFF CGI data
+            else:
+                cgi_dict[(vcf_chrom,vcf_pos)] = alleles
+
+    # remove positions where we observed three alleles in our SISSOR data from the CGI dictionary
+    # we don't want to compare against them, they'll skew the result
+    # these should be thrown out and left uncalled by our caller
+    with open(triallelic_file,'r') as tri:
+        for line in tri:
+            if len(line) < 3:
+                continue
+            chrom, pos = line.strip().split('\t')
+            pos = int(pos)
+
+            if (chrom,pos) in cgi_dict:
+                del cgi_dict[(chrom,pos)]
+
+    match = 0
+    mismatch = 0
+    snv_match = 0
+    snv_mismatch = 0
+
+    with open(chamber_call_file,'r') as ccf, open(mismatch_outfile,'w') as mof:
         print('chr\tpos\tsissor_call\tCGI_allele\tref',file=mof)
-        chroms = ['chr{}'.format(x) for x in range(1,23)] + ['chrX','chrY']
-        def read_ccf_line():
-            ccf_line  = ccf.readline()
-            if not ccf_line or len(ccf_line) < 3:
-                return None,None,None,None
-                
-            ccf_line = ccf_line.strip().split('\t')
+        for line in ccf:
+            ccf_line = line.strip().split('\t')
             ccf_chrom = ccf_line[0]
             ccf_pos   = int(ccf_line[1])
             ref_allele = ccf_line[2]
 
-            alleles = []
+            if ccf_chrom == 'chrX' or ccf_chrom == 'chrY':
+                continue
+
+            if (ccf_chrom,ccf_pos) not in cgi_dict:
+                continue
+
+            ccf_alleles       = []
+            min_chamber_score = 1.01
 
             for call in ccf_line[3:-1]:
                 if call == '*':
@@ -34,107 +110,59 @@ def chamber_allele_call_accuracy(chamber_call_file, GFF_file, cutoff, result_out
 
                 el2 = call.split(';')
 
+                max_prob = -1
+                max_allele = 'N'
                 for entry in el2:
 
                     a_info, prob = entry.split(':')
                     prob = float(prob)
 
-                    if prob > cutoff:
-                        if len(a_info) == 1:
-                            allele = {a_info}
-                        elif len(a_info) == 2:
-                            allele = {a_info[0],a_info[1]}
-                        alleles.append(allele)
+                    if len(a_info) == 1:
+                        allele = {a_info}
+                    elif len(a_info) == 2:
+                        allele = {a_info[0],a_info[1]}
 
-            return ccf_chrom, ccf_pos, alleles, ref_allele
+                    if prob > max_prob:
+                        max_prob = prob
+                        max_allele = allele
 
-        def read_gff_line():
-            gff_line  = gff.readline()
-            if not gff_line:
-                return None,None,None,None
-            elif gff_line[0] == '#': # header line
-                return read_gff_line()
-            gff_line = gff_line.strip().split('\t')
-            gff_chrom = gff_line[0]
-            gff_pos   = int(gff_line[3])
-            if(gff_pos != int(gff_line[4])):
-                return read_gff_line()
+                if len(max_allele) == 1:
+                    ccf_alleles.append(max_allele)
 
-            info = gff_line[8].strip().split(';')
-            a_info = info[0]
-            assert('alleles' in a_info)
-            a_info = a_info[8:]
+                if max_prob <= min_chamber_score:
+                    min_chamber_score = max_prob
 
-            r_info = info[2]
-            assert('ref_allele' in r_info)
-            ref_allele = r_info[10:]
+            has_allele_mix = False
+            for allele in ccf_alleles:
+                if len(allele) == 2:
+                    has_allele_mix = True
 
-            if len(a_info) == 1:
-                alleles = {a_info}
-            elif len(a_info) == 3:
-                alleles = {a_info[0],a_info[2]}
-            else:
-                print("Unexpected number of alleles")
-                assert(False)
-
-            return gff_chrom, gff_pos, alleles, ref_allele
-
-        match = 0
-        mismatch = 0
-            
-        i = 0
-        ccf_chrom = None
-        gff_chrom = None
-        ref_allele = None
-        while i < len(chroms):
-            
-            chrom = chroms[i]
-
-            while ccf_chrom != chrom:
-                ccf_chrom, ccf_pos, ccf_alleles, ref_allele = read_ccf_line()
-                if not ccf_chrom:
-                    break
-            while gff_chrom != chrom:
-                gff_chrom, gff_pos, gff_alleles, ref_allele2 = read_gff_line()
-                if not gff_chrom:
-                    break                
-            # leave these out for now
-            if chrom == 'chrX' or chrom == 'chrY':
-                i += 1
+            if min_chamber_score < cutoff or has_allele_mix:
                 continue
-            # in this loop, both files are considering positions of same chromosome
-            while True:
-    
-                while ccf_chrom == chrom and ccf_pos < gff_pos:
-                    ccf_chrom, ccf_pos, ccf_alleles, ref_allele = read_ccf_line()
-                while gff_chrom == chrom and gff_pos < ccf_pos:
-                    gff_chrom, gff_pos, gff_alleles, ref_allele2 = read_gff_line()
-                                
-                if gff_chrom != chrom or ccf_chrom != chrom:
-                    i += 1
-                    break
-                
-                assert(ccf_chrom == gff_chrom)
-                assert(ccf_pos   == gff_pos)
-                
-                # do stuff with data lines
-                
-                for allele in ccf_alleles:
-                    
-                    if allele <= gff_alleles:
-                        
-                        match += 1
-                    
-                    else:
-                        
-                        mismatch += 1
-                        print("{}\t{}\t{}\t{}\t{}".format(ccf_chrom,ccf_pos,''.join(allele),''.join(gff_alleles), ref_allele),file=mof)
-                
-                
-                # we've processed a position so move both files ahead one
-                ccf_chrom, ccf_pos, ccf_alleles, ref_allele  = read_ccf_line()
-                gff_chrom, gff_pos, gff_alleles, ref_allele2 = read_gff_line()
-        
-        
-        print("MATCH:    {}".format(match),file=rof)
-        print("MISMATCH: {}".format(mismatch),file=rof)
+
+            for allele in ccf_alleles:
+
+                if len(allele) > 1:
+                    continue
+
+                if allele <= cgi_dict[(ccf_chrom,ccf_pos)]:
+
+                    match += 1
+                    if allele != {ref_allele}:
+                        snv_match += 1
+
+                else:
+
+                    mismatch += 1
+                    if allele != {ref_allele}:
+                        snv_mismatch += 1
+
+                    print("{}\t{}\t{}\t{}\t{}".format(ccf_chrom,ccf_pos,''.join(allele),''.join(cgi_dict[(ccf_chrom,ccf_pos)]), ref_allele),file=mof)
+
+    with open(result_outfile,'w') as rof:
+        print("MATCH:        {}".format(match),file=rof)
+        print("MISMATCH:     {}".format(mismatch),file=rof)
+        print("ERR RATE:     {}".format(mismatch / (match + mismatch)),file=rof)
+        print("SNV MATCH:    {}".format(snv_match),file=rof)
+        print("SNV MISMATCH: {}".format(snv_mismatch),file=rof)
+        print("SNV FDR:      {}".format(snv_mismatch / (snv_match + snv_mismatch)),file=rof)

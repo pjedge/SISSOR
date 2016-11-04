@@ -36,7 +36,7 @@ def addlogs(a,b):
         return a + log10(1 + pow(10, b - a))
     else:
         return b + log10(1 + pow(10, a - b))
-   
+
 ###############################################################################
 # CONSTANTS
 ###############################################################################
@@ -175,7 +175,7 @@ def compute_mixed_allele_priors():
                         G2 = G[1]
                         G1_present = (c1 == j or c2 == j)
                         G2_present = (c3 == j or c4 == j)
-                    
+
                         if G1_present and G2_present:
                             if G1 != G2:
                                 alleles_present = G
@@ -219,31 +219,36 @@ def compute_caches():
 
 compute_caches()
 
-def pr_one_chamber_data(alleles_present, base_data, qual_data):
+def pr_one_chamber_data(alleles_present, base_data, qual_data, fast_mode):
 
-    
+
     n = len(base_data)
     assert(n == len(qual_data))
-
+    p = 0
     if len(alleles_present) == 1:
-        p = 0
+
         for base,qual in zip(base_data, qual_data):
             p += one_allele_cache[(qual, (alleles_present[0] == base))]
 
     elif len(alleles_present) == 2:
-        p = -1e10
-        L = len(cov_frac_dist[n])
-        for i, p0 in enumerate(cov_frac_dist[n]):
-            p0 = log10(p0) if p0 > 0 else tinylog
-            frac = i / L
-            for base,qual in zip(base_data, qual_data):
-                p0 += two_allele_cache[(frac, qual, (alleles_present[0] == base), (alleles_present[1] == base))]
 
-            p = addlogs(p, p0)
+        if fast_mode:
+            for base,qual in zip(base_data, qual_data):
+                p += two_allele_cache[(0.5, qual, (alleles_present[0] == base), (alleles_present[1] == base))]
+        else:
+            p = -1e10
+            L = len(cov_frac_dist[n])
+            for i, p0 in enumerate(cov_frac_dist[n]):
+                p0 = log10(p0) if p0 > 0 else tinylog
+                frac = i / L
+                for base,qual in zip(base_data, qual_data):
+                    p0 += two_allele_cache[(frac, qual, (alleles_present[0] == base), (alleles_present[1] == base))]
+
+                p = addlogs(p, p0)
 
     return p
 
-def precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers):
+def precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers, fast_mode):
 
     pr_one_ch = dict()
 
@@ -270,17 +275,17 @@ def precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers):
             for allele in mixed_alleles:
 
                 if present[allele]:
-                    pr_one_ch[(cell, chamber, allele)] = pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber])
+                    pr_one_ch[(cell, chamber, allele)] = pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber], fast_mode)
 
                 elif len(allele) == 1:
                     if not_present_val_one_allele == None:
-                        not_present_val_one_allele = pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber])
+                        not_present_val_one_allele = pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber], fast_mode)
 
                     #assert(not_present_val_one_allele == pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber]))
                     pr_one_ch[(cell, chamber, allele)] = not_present_val_one_allele
                 elif len(allele) == 2:
                     if not_present_val_two_allele == None:
-                        not_present_val_two_allele = pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber])
+                        not_present_val_two_allele = pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber], fast_mode)
 
                     #assert(not_present_val_two_allele == pr_one_chamber_data(allele, base_data[cell][chamber], qual_data[cell][chamber]))
                     pr_one_ch[(cell, chamber, allele)] = not_present_val_two_allele
@@ -299,10 +304,10 @@ def pr_all_chamber_data(allele, ref_allele, cell, chamber, pr_one_ch, nonzero_ch
     p_total = tinylog
 
     for G in genotypes:
-        
+
         #configs = copy.copy(hom_het_configs[0]) if G[0] == G[1] else copy.copy(hom_het_configs[1])
         configs = hom_het_configs[0] if G[0] == G[1] else hom_het_configs[1]
-        
+
         for config in configs:
 
             p = genotype_priors[ref_allele][G]
@@ -313,7 +318,7 @@ def pr_all_chamber_data(allele, ref_allele, cell, chamber, pr_one_ch, nonzero_ch
             G2 = G[1]
             G1_present = (c1 == chamber or c2 == chamber)
             G2_present = (c3 == chamber or c4 == chamber)
-        
+
             if G1_present and G2_present:
                 if G1 != G2:
                     alleles_present = G
@@ -337,12 +342,12 @@ def pr_all_chamber_data(allele, ref_allele, cell, chamber, pr_one_ch, nonzero_ch
                 p += p_cell_cfg
 
                 for j in nonzero_chambers[i]:
-                
+
                     G1 = G[0]
                     G2 = G[1]
                     G1_present = (c1 == j or c2 == j)
                     G2_present = (c3 == j or c4 == j)
-                
+
                     if G1_present and G2_present:
                         if G1 != G2:
                             alleles_present = G
@@ -356,9 +361,9 @@ def pr_all_chamber_data(allele, ref_allele, cell, chamber, pr_one_ch, nonzero_ch
                         alleles_present = None
 
                     p += pr_one_ch[(i,j,alleles_present)]
-                                   
+
             p_total = addlogs(p_total,p)
-            
+
     return p_total
 
 # probability that allele is present in chamber
@@ -376,7 +381,7 @@ def pr_allele(cell, chamber, pr_one_ch, nonzero_chambers, mixed_allele_priors, r
     # denominator for bayes rule posterior calculation
     total = tinylog
     for p in probs:
-        total = addlogs(total,p) 
+        total = addlogs(total,p)
 
     for a,p in zip(mixed_alleles,probs):
         posterior = p - total
@@ -397,7 +402,7 @@ def parse_mpileup_base_qual(raw_bd, raw_qd, ref_base):
 
     bd = [] # base data
     qd = [] # qual data
-    
+
     if not re.search(plus_or_minus,raw_bd):
 
         bd = str.upper(re.sub(caret_money,'', raw_bd))
@@ -406,16 +411,16 @@ def parse_mpileup_base_qual(raw_bd, raw_qd, ref_base):
         paired_bd_qd = [(b,q) for b,q in zip(bd,qd) if b not in ['>','<','*','n','N']]
         if len(paired_bd_qd) < coverage_cut:
             return [],[]
-        
+
         bd, qd = zip(*paired_bd_qd)
         bd = list(bd)
         qd = list(qd)
-    
+
     else:
-        
+
         i = 0   # index for base data
         j = 0   # index for qual data
-    
+
         while i < len(raw_bd):
             if raw_bd[i] == '.' or raw_bd[i] == ',':   # reference base call
                 bd.append(ref_base)
@@ -442,10 +447,10 @@ def parse_mpileup_base_qual(raw_bd, raw_qd, ref_base):
             elif raw_bd[i] in '><*nN':                 # reference skip or deletion
                 i += 1
                 j += 1
-    
+
         assert(i == len(raw_bd))
         assert(j == len(raw_qd))
-        
+
     assert(len(bd) == len(qd))
 
     for b in bd:
@@ -453,9 +458,20 @@ def parse_mpileup_base_qual(raw_bd, raw_qd, ref_base):
 
 
     return bd, qd
-    
 
-def call_chamber_alleles(input_file, output_file, SNPs_only=True):
+
+def call_chamber_alleles(input_file, output_file, mode='call_all'):
+
+    SNPs_only = False
+    no_SNPs   = False
+    call_all  = False
+    if mode == 'SNPs_only':
+        SNPs_only = True
+    elif mode == 'no_SNPs':
+        no_SNPs = True
+    elif mode == 'call_all':
+        call_all = True
+
 
     mixed_allele_priors = compute_mixed_allele_priors()
     processed = 0
@@ -491,9 +507,6 @@ def call_chamber_alleles(input_file, output_file, SNPs_only=True):
                     if depth < coverage_cut or el[col_ix + 1] == '*':
                         continue
 
-                    nonzero_chambers[cell_num].append(ch_num)
-                    nonzero_chamber_count += 1
-
                     raw_bd = el[col_ix + 1]
                     raw_qd = el[col_ix + 2]
 
@@ -501,7 +514,10 @@ def call_chamber_alleles(input_file, output_file, SNPs_only=True):
 
                     if len(bd) < coverage_cut:
                         continue
-                    
+
+                    nonzero_chambers[cell_num].append(ch_num)
+                    nonzero_chamber_count += 1
+
                     for b in bd:
                         if b != ref_base:
                             total_nonref += 1
@@ -509,8 +525,12 @@ def call_chamber_alleles(input_file, output_file, SNPs_only=True):
                     base_data[cell_num][ch_num] = bd[:max_cov]
                     qual_data[cell_num][ch_num] = qd[:max_cov]
 
-            if SNPs_only and total_nonref < min_nonref:
+            if (SNPs_only and total_nonref < min_nonref) or (no_SNPs and total_nonref >= min_nonref):
                 continue
+
+            fast_mode = False
+            if total_nonref < min_nonref:
+                fast_mode = True # skip heavy computation for likely non-SNV
 
             outline_el = ['*']*(n_chambers*n_cells)
 
@@ -523,7 +543,7 @@ def call_chamber_alleles(input_file, output_file, SNPs_only=True):
 
             if nonzero_chamber_count > 0 and not too_many_chambers:
 
-                pr_one_ch = precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers)
+                pr_one_ch = precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers, fast_mode)
 
                 for cell in range(0,n_cells):  # for each cell
                     for chamber in nonzero_chambers[cell]:
