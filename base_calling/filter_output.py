@@ -5,8 +5,9 @@ Created on Mon Oct  3 18:29:04 2016
 
 @author: peter
 """
+import sys
 
-infile = 'output_calls.txt'
+infile = sys.argv[1]
 CUTOFF = 0.999999
 
 with open(infile,'r') as inf:
@@ -27,6 +28,6 @@ with open(infile,'r') as inf:
                 allele, prob = entry.split(':')
                 prob = float(prob)
                 
-                if prob > CUTOFF and allele != ref_allele:
+                if prob > CUTOFF and allele != ref_allele and len(allele) == 2:
                     print(line,end='')
                     
