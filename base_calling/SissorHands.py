@@ -3,6 +3,7 @@ import argparse
 #import sys
 #from collections import defaultdict
 import itertools
+
 from math import log10
 from pdb import set_trace
 if False:
@@ -10,13 +11,23 @@ if False:
 import time
 import re
 import pickle
+
+#from numpy import logaddexp as addlogs
+
+def addlogs(a,b):
+    if a > b:
+        return a + log10(1 + pow(10, b - a))
+    else:
+        return b + log10(1 + pow(10, a - b))
+
+from collections import defaultdict
 #import copy
 #import sys
 #from matplotlib import pyplot as plt
 desc = 'Use cross-chamber inpormation to call chamber alleles in SISSOR data'
 
 default_input_file = 'test_subsample.txt'
-default_output_file = 'text_subsample.txt'
+default_output_file = 'test_subsample.output'
 
 ###############################################################################
 # PARSE STDIN
@@ -25,17 +36,13 @@ default_output_file = 'text_subsample.txt'
 def parseargs():
 
     parser = argparse.ArgumentParser(description=desc)
-    parser.add_argument('-i', '--input_file', nargs='?', type = str, help='input file, pileup with 3 cells x 24 chambers', default=default_input_file)
+    parser.add_argument('-i', '--input_file', nargs='?', type = str, help='input file, pileup with n cells x 24 chambers', default=default_input_file)
     parser.add_argument('-o', '--output_file', nargs='?', type = str, help='file to write output to', default=default_output_file)
+    parser.add_argument('-n', '--num_cells', nargs='?', type = int, help='number of cells being analyzed, default: 3', default=3)
 
     args = parser.parse_args()
     return args
 
-def addlogs(a,b):
-    if a > b:
-        return a + log10(1 + pow(10, b - a))
-    else:
-        return b + log10(1 + pow(10, a - b))
 
 ###############################################################################
 # CONSTANTS
@@ -43,7 +50,7 @@ def addlogs(a,b):
 
 coverage_cut = 3
 max_cov = 100
-min_nonref = 2
+min_nonref = 5
 chroms = ['chr{}'.format(i) for i in range(1,23)] + ['chrX','chrY']
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 n_chambers = 24
@@ -55,7 +62,7 @@ n_cells = 3
 numbers = '0123456789'
 base_letters = 'ACGTacgt'
 mixed_alleles = [('A',),('T',),('G',),('C',), ('A', 'T'),('A', 'G'),('A', 'C'),('T', 'G'),('T', 'C'),('G', 'C')]
-tinylog = -1e5
+tinylog = -1e100
 
 ###############################################################################
 # LOAD PARAMETERS
@@ -81,7 +88,7 @@ def singlecell_config(het,nonzero_chambers):
     nz = nonzero_chambers + [n_chambers]
     nzs = set(nonzero_chambers)
 
-    configs = []
+    configs = defaultdict(lambda: tinylog)
     done    = set()
     for c1,c2,c3,c4 in itertools.product(nz,nz,nz,nz):
         if set.intersection({c1,c2,c3,c4},nzs) != nzs:
@@ -115,7 +122,16 @@ def singlecell_config(het,nonzero_chambers):
         else:
             prob = hom_config_probs[sl]
 
-        configs.append(((c1,c2,c3,c4),prob))
+        if (c1 == c2 and c1 != 24):
+            c2 = 24
+        if (c3 == c4 and c3 != 24):
+            c4 = 24
+
+        configs[(c1,c2,c3,c4)] = addlogs(configs[(c1,c2,c3,c4)], prob)
+
+        #configs.append(((c1,c2,c3,c4),prob))
+
+    configs = list(configs.items())
 
     total = configs[0][1]
 
@@ -299,40 +315,24 @@ def precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers, fast_mode)
 # qual_data: list length 24, containing 1 list per chamber. inner list has q values (p(base call error)) callin in chamber.
 # configs:   list of configurations and their probabilities, see earlier
 
-def pr_all_chamber_data(allele, ref_allele, cell, chamber, pr_one_ch, nonzero_chambers, hom_het_configs):
+def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, condensed_genotype_set):
 
-    p_total = tinylog
+    probs = dict()
+    outline_el = ['*'] + ['*'] * (n_cells * n_chambers)
 
-    for G in genotypes:
+    hom_het_configs = [multicell_config(False,nonzero_chambers),multicell_config(True,nonzero_chambers)]
+    p_assignment = defaultdict(lambda: tinylog)
+    genotype_set = genotypes if condensed_genotype_set == None else condensed_genotype_set
 
-        #configs = copy.copy(hom_het_configs[0]) if G[0] == G[1] else copy.copy(hom_het_configs[1])
+    for G in genotype_set:
+
         configs = hom_het_configs[0] if G[0] == G[1] else hom_het_configs[1]
+        p_total = genotype_priors[ref_allele][G]
 
         for config in configs:
 
-            p = genotype_priors[ref_allele][G]
-
-            (c1,c2,c3,c4), p_cell_cfg = config[cell]
-
-            G1 = G[0]
-            G2 = G[1]
-            G1_present = (c1 == chamber or c2 == chamber)
-            G2_present = (c3 == chamber or c4 == chamber)
-
-            if G1_present and G2_present:
-                if G1 != G2:
-                    alleles_present = G
-                else:
-                    alleles_present = (G1,)
-            elif G1_present and not G2_present:
-                alleles_present = (G1,)
-            elif G2_present and not G1_present:
-                alleles_present = (G2,)
-            else:
-                alleles_present = None
-
-            if alleles_present != allele:
-                continue
+            p = 0
+            assignments = set()
 
             for i in range(0,n_cells):
                 if len(nonzero_chambers[i]) == 0:
@@ -362,32 +362,56 @@ def pr_all_chamber_data(allele, ref_allele, cell, chamber, pr_one_ch, nonzero_ch
 
                     p += pr_one_ch[(i,j,alleles_present)]
 
-            p_total = addlogs(p_total,p)
+                    assignments.add((i,j,alleles_present))
 
-    return p_total
+            p_total = addlogs(p_total, p) # update genotype likelihood sum
 
-# probability that allele is present in chamber
-def pr_allele(cell, chamber, pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele):
+            for assignment in assignments:
+                p_assignment[assignment] = addlogs(p_assignment[assignment], p + genotype_priors[ref_allele][G])
 
-    res = []
-    probs = []
-
-    num_nonzero = len(nonzero_chambers[cell])
-    hom_het_configs = [multicell_config(False,nonzero_chambers),multicell_config(True,nonzero_chambers)]
-
-    for allele in mixed_alleles:
-        probs.append(pr_all_chamber_data(allele, ref_allele, cell, chamber, pr_one_ch, nonzero_chambers, hom_het_configs) + mixed_allele_priors[ref_allele][num_nonzero][allele])
+        probs[G] = p_total
 
     # denominator for bayes rule posterior calculation
     total = tinylog
-    for p in probs:
+    for G,p in probs.items():
         total = addlogs(total,p)
 
-    for a,p in zip(mixed_alleles,probs):
-        posterior = p - total
-        res.append((a,10**posterior))
+    res = []
+    for G in genotypes:
+        if G in probs:
+            posterior = probs[G] - total
+            res.append((G,10**posterior))
+        else:
+            res.append((G,0.0))
 
-    return res
+    out_str = ';'.join(['{}:{}'.format(''.join(g),p) for g,p in res])
+    outline_el[0] = out_str
+
+    for cell in range(0,n_cells):  # for each cell
+        for chamber in nonzero_chambers[cell]:
+
+            num_nonzero = len(nonzero_chambers[cell])
+            #pr_all_chamber_data(allele, ref_allele, cell, chamber, pr_one_ch, nonzero_chambers, hom_het_configs)
+            probs = []
+            for allele in mixed_alleles:
+                prob = p_assignment[(cell,chamber,allele)] + mixed_allele_priors[ref_allele][num_nonzero][allele]
+                probs.append((allele,prob))
+
+            # denominator for bayes rule posterior calculation
+            total = tinylog
+            for a,p in probs:
+                total = addlogs(total,p)
+
+            res = []
+            for a,p in probs:
+                posterior = p - total
+                res.append((a,10**posterior))
+
+            out_str = ';'.join(['{}:{}'.format(''.join(a),p) for a,p in res])
+
+            outline_el[1 + cell*n_chambers + chamber] = out_str
+
+    return outline_el
 
 ###############################################################################
 # MAIN FUNCTION AND PARSING
@@ -456,7 +480,6 @@ def parse_mpileup_base_qual(raw_bd, raw_qd, ref_base):
     for b in bd:
         assert(b in bases)
 
-
     return bd, qd
 
 
@@ -464,14 +487,11 @@ def call_chamber_alleles(input_file, output_file, mode='call_all'):
 
     SNPs_only = False
     no_SNPs   = False
-    call_all  = False
+    #call_all  = False
     if mode == 'SNPs_only':
         SNPs_only = True
     elif mode == 'no_SNPs':
         no_SNPs = True
-    elif mode == 'call_all':
-        call_all = True
-
 
     mixed_allele_priors = compute_mixed_allele_priors()
     processed = 0
@@ -495,7 +515,7 @@ def call_chamber_alleles(input_file, output_file, mode='call_all'):
             assert(ref_base in bases)
 
             total_nonref = 0
-
+            base_count = {'A':0,'G':0,'T':0,'C':0}
             for cell_num in range(n_cells):
                 for ch_num in range(n_chambers):
 
@@ -519,20 +539,27 @@ def call_chamber_alleles(input_file, output_file, mode='call_all'):
                     nonzero_chamber_count += 1
 
                     for b in bd:
+                        base_count[b] += 1
                         if b != ref_base:
                             total_nonref += 1
 
                     base_data[cell_num][ch_num] = bd[:max_cov]
                     qual_data[cell_num][ch_num] = qd[:max_cov]
 
+            base_count = sorted(list(base_count.items()),key=lambda x: x[1],reverse=True)
+            major_allele = base_count[0][0]
+
+            fast_mode = False
+            condensed_genotype_set = None
+
+            if total_nonref < min_nonref:
+                fast_mode = True # skip heavy computation for likely non-SNV
+                condensed_genotype_set = [G for G in genotypes if major_allele in G]
+
             if (SNPs_only and total_nonref < min_nonref) or (no_SNPs and total_nonref >= min_nonref):
                 continue
 
-            fast_mode = False
-            if total_nonref < min_nonref:
-                fast_mode = True # skip heavy computation for likely non-SNV
-
-            outline_el = ['*']*(n_chambers*n_cells)
+            outline_el = ['*'] + ['*']*(n_chambers*n_cells)
 
             too_many_chambers = False
             for nz in nonzero_chambers:
@@ -541,18 +568,33 @@ def call_chamber_alleles(input_file, output_file, mode='call_all'):
                     tags.append('TOO_MANY_CHAMBERS')
                     break
 
+            maj_alleles = set()
+            for cell in range(0,n_cells):  # for each cell
+                for chamber in nonzero_chambers[cell]:
+
+                    basecounts = defaultdict(int)
+                    for base in base_data[cell][chamber]:
+                        basecounts[base] += 1
+
+                    max_k = 'N'
+                    max_v = -1
+                    for k,v in basecounts.items():
+                        if v > max_v:
+                            max_v = v
+                            max_k = k
+
+                    if(max_k == 'N'):
+                        set_trace()
+                    maj_alleles.add(max_k)
+
+            if len(maj_alleles) >= 3:
+                tags.append('TOO_MANY_ALLELES')
+
             if nonzero_chamber_count > 0 and not too_many_chambers:
 
                 pr_one_ch = precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers, fast_mode)
+                outline_el = pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_base, condensed_genotype_set)
 
-                for cell in range(0,n_cells):  # for each cell
-                    for chamber in nonzero_chambers[cell]:
-
-                        res = pr_allele(cell, chamber, pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_base)
-
-                        out_str = ';'.join(['{}:{}'.format(''.join(a),p) for a,p in res])
-
-                        outline_el[cell*n_chambers + chamber] = out_str
             outline_el = [chrom, str(pos+1), ref_base] + outline_el
             tag_info = ';'.join(tags) if tags != [] else 'N/A'
             outline_el.append(tag_info)
@@ -565,6 +607,7 @@ def call_chamber_alleles(input_file, output_file, mode='call_all'):
 if __name__ == '__main__':
     t1 = time.time()
     args = parseargs()
+    n_cells = args.num_cells
     call_chamber_alleles(args.input_file, args.output_file,False)
     t2 = time.time()
 

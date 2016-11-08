@@ -90,25 +90,25 @@ rule chamber_allele_call_accuracies:
             mof = 'accuracy_reports/cutoff{cut}.mismatches'
     run:
         caca.chamber_allele_call_accuracy(input.ccf,input.gff,input.vcf,input.triallelic,(1.0-10**(-1*int(wildcards.cut))),output.rof,output.mof)
-'''
+
 rule combine_trallelic:
     params: job_name = 'combine_trallelic'
-    input:  expand('triallelic/split/{r}.SNPs_only.out',r=regions)
+    input:  expand('triallelic/split/{r}.out',r=regions)
     output: 'triallelic/triallelic.out'
     shell: 'cat {input} > {output}'
 
 rule call_triallelic:
     params: job_name = 'call_trallelic.{r}'
     input:  'pileups/split/{r}.pileup'
-    output: 'triallelic/split/{r}.SNPs_only.out'
+    output: 'triallelic/split/{r}.out'
     run:
         import call_triallelic as ta
         ta.call_triallelic(input[0], output[0], mode='SNPs_only')
 
 rule combine_base_calls:
     params: job_name = 'combine_base_calls'
-    input:  expand('output/split/{r}.no_SNPs.out',r=regions)
-    output: 'output/chamber_allele_calls.no_SNPs.out'
+    input:  expand('output/split/{r}.out',r=regions)
+    output: 'output/chamber_allele_calls.out'
     shell: 'cat {input} > {output}'
 
 rule call_alleles:
@@ -121,10 +121,10 @@ rule call_alleles:
             'parameters/het_config_probs.p',
             'parameters/genotype_priors.p',
             'parameters/omega.p'
-    output: 'output/split/{r}.no_SNPs.out'
+    output: 'output/split/{r}.out'
     run:
-        import call_chamber_alleles as cca
-        cca.call_chamber_alleles(input[0], output[0], mode='no_SNPs')
+        import SissorHands
+        SissorHands.call_chamber_alleles(input[0], output[0])
 
 rule estimate_parameters:
     params: job_name = 'estimate_parameters'
@@ -187,7 +187,7 @@ rule bam2sam:
     input:  'bams/{s}/old.ch{c}.bam'
     output: temp(rules.fix_sam.input)
     shell: '{SAMTOOLS} view -h {input} > {output}'
-'''
+
 # simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
 rule simlinks:
     run:
