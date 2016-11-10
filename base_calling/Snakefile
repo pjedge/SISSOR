@@ -97,13 +97,13 @@ rule call_alleles:
     params: job_name = 'call_alleles.{r}'
     input:  pileup = 'pileups/split/{r}.pileup',
             boundary_files = expand('fragment_boundary_beds/{ce}/ch{ch}.bed',ch=chambers,ce=cells),
-            'parameters/cov_frac_dist.p',
-            'parameters/p_null.p',
-            'parameters/ch_priors.p',
-            'parameters/hom_config_probs.p',
-            'parameters/het_config_probs.p',
-            'parameters/genotype_priors.p',
-            'parameters/omega.p'
+            cov_frac_dist = 'parameters/cov_frac_dist.p',
+            p_null = 'parameters/p_null.p',
+            ch_priors = 'parameters/ch_priors.p',
+            hom_config_probs = 'parameters/hom_config_probs.p',
+            het_config_probs = 'parameters/het_config_probs.p',
+            genotype_priors = 'parameters/genotype_priors.p',
+            omega = 'parameters/omega.p'
     output: 'output/split/{r}.out'
     run:
         import sissorhands
@@ -131,13 +131,14 @@ rule estimate_parameters:
 
 rule obtain_counts_parallel:
     params: job_name = 'obtain_counts_parallel.{r}'
-    input:  'pileups/split/{r}.pileup'
+    input:  pileup = 'pileups/split/{r}.pileup',
+            boundary_files = expand('fragment_boundary_beds/{ce}/ch{ch}.bed',ch=chambers,ce=cells)
     output: 'parameters/split/chrX_covs.{r}.p',
             'parameters/split/chamber_position_counts.{r}.p',
             'parameters/split/strand_coverage_counts.{r}.p',
             'parameters/split/total_sampled_cell_positions.{r}.p',
     run:
-        estimate_parameters.obtain_counts_parallel(input[0], boundary_files, inputwildcards.r)
+        estimate_parameters.obtain_counts_parallel(input.pileup, input.boundary_files, wildcards.r)
 
 rule pileup:
     params: job_name = 'pileup.{r}',
@@ -147,7 +148,7 @@ rule pileup:
     input:  bams = expand('bams/{ce}/ch{ch}.bam',ch=chambers,ce=cells),
             bais = expand('bams/{ce}/ch{ch}.bam.bai',ch=chambers,ce=cells)
     output: pileup = 'pileups/split/{r}.pileup'
-    shell:  '{SAMTOOLS} mpileup --region {params.chrom}:{params.start}-{params.stop} --adjust-MQ 50 --max-depth 100 --output-MQ --min-MQ 30 --min-BQ 20 --fasta-ref {HG19} --output {output.pileup} {input.bams}'
+    shell:  '{SAMTOOLS} mpileup --region {params.chrom}:{params.start}-{params.stop} --adjust-MQ 50 --max-depth 100 --output-MQ --min-MQ 50 --min-BQ 30 --fasta-ref {HG19} --output {output.pileup} {input.bams}'
 
 rule index_bam:
     params: job_name = 'index_bam{ce}.{ch}'
