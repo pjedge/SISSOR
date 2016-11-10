@@ -12,7 +12,7 @@ Created on Mon Oct  3 18:29:04 2016
 # cutoff is the minimum probability of an allele call to use it
 # result outfile simply contains the counts of match vs mismatched alleles
 # mismatch_outfile prints locations of mismatched allele calls
-def chamber_allele_call_accuracy(chamber_call_file, GFF_file, VCF_file, triallelic_file, cutoff, result_outfile, mismatch_outfile):
+def chamber_allele_call_accuracy(chamber_call_file, GFF_file, VCF_file, cutoff, result_outfile, mismatch_outfile):
 
     # add heterozygous alleles observed in one CGI dataset to a dictionary
     cgi_dict = dict()
@@ -69,19 +69,6 @@ def chamber_allele_call_accuracy(chamber_call_file, GFF_file, VCF_file, triallel
             else:
                 cgi_dict[(vcf_chrom,vcf_pos)] = alleles
 
-    # remove positions where we observed three alleles in our SISSOR data from the CGI dictionary
-    # we don't want to compare against them, they'll skew the result
-    # these should be thrown out and left uncalled by our caller
-    with open(triallelic_file,'r') as tri:
-        for line in tri:
-            if len(line) < 3:
-                continue
-            chrom, pos = line.strip().split('\t')
-            pos = int(pos)
-
-            if (chrom,pos) in cgi_dict:
-                del cgi_dict[(chrom,pos)]
-
     match = 0
     mismatch = 0
     snv_match = 0
@@ -95,16 +82,38 @@ def chamber_allele_call_accuracy(chamber_call_file, GFF_file, VCF_file, triallel
             ccf_pos   = int(ccf_line[1])
             ref_allele = ccf_line[2]
 
+            tags = ccf_line[-1].split(';')
+
             if ccf_chrom == 'chrX' or ccf_chrom == 'chrY':
                 continue
 
             if (ccf_chrom,ccf_pos) not in cgi_dict:
                 continue
 
-            ccf_alleles       = []
-            min_chamber_score = 1.01
+            if 'TOO_MANY_ALLELES' in tags or 'TOO_MANY_CHAMBERS' in tags:
+                continue
 
-            for call in ccf_line[3:-1]:
+            call = ccf_line[3]
+
+            if call == '*':
+                continue
+
+            el2 = call.split(';')
+
+            genotype_prob = -1
+            #max_genotype = 'NN'
+            for entry in el2:
+
+                genotype, prob = entry.split(':')
+                prob = float(prob)
+
+                if prob > genotype_prob:
+                    genotype_prob = prob
+                    #max_genotype = genotype
+
+            ccf_alleles       = []
+
+            for call in ccf_line[4:-1]:
                 if call == '*':
                     continue
 
@@ -129,15 +138,12 @@ def chamber_allele_call_accuracy(chamber_call_file, GFF_file, VCF_file, triallel
                 if len(max_allele) == 1:
                     ccf_alleles.append(max_allele)
 
-                if max_prob <= min_chamber_score:
-                    min_chamber_score = max_prob
+            #has_allele_mix = False
+            #for allele in ccf_alleles:
+            #    if len(allele) == 2:
+            #        has_allele_mix = True
 
-            has_allele_mix = False
-            for allele in ccf_alleles:
-                if len(allele) == 2:
-                    has_allele_mix = True
-
-            if min_chamber_score < cutoff or has_allele_mix:
+            if genotype_prob < cutoff:
                 continue
 
             for allele in ccf_alleles:

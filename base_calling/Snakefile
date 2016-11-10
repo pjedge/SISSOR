@@ -4,7 +4,7 @@ import random
 import estimate_parameters
 import fix_sam
 import chamber_allele_call_accuracy as caca
-import base_calls_to_vcf
+#import base_calls_to_vcf
 
 localrules: all, simlinks
 
@@ -13,19 +13,16 @@ localrules: all, simlinks
 # and 5 => 0.99999
 cutoffs = list(range(1,17))
 
+
 rule all:
     input:
-        expand('het_vcfs/cutoff{cut}.whole_genome.vcf',cut=cutoffs)
-        #expand('accuracy_reports/cutoff{cut}.results',cut=cutoffs)
-        #'triallelic/triallelic.out'
-        #'output/chamber_allele_calls.no_SNPs.out'
+        expand('accuracy_reports/cutoff{cut}.results',cut=cutoffs)
 
-samples = ['PGP1_21','PGP1_22','PGP1_A1']
+cells = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
 chambers_pad = ['{0:02d}'.format(c) for c in chambers]
 grams_DNA_before_MDA  = 0.25e-12  # 0.25 pg
 grams_DNA_after_MDA = 6e-9        # 6 ng
-
 chunksize = int(5e6)
 
 SAMTOOLS = '/opt/biotools/samtools/1.3/bin/samtools'
@@ -70,11 +67,11 @@ for chrom, chrlen in hg19_size_list:
         chunklist.append((chrom,start,end))
 
 regions = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in chunklist]
-#regions = ['chr2.170000001.175000000']
+regions = ['chr2.170000001.175000000']
 
 rule het_vcf_file:
     params: job_name = 'het_vcf_file.{cut}'
-    input:  ccf = 'output/chamber_allele_calls.SNPs_only.out',
+    input:  ccf = 'output/chamber_allele_calls.out',
             triallelic = 'triallelic/triallelic.out'
     output: vcf = 'het_vcfs/cutoff{cut}.whole_genome.vcf',
     run:
@@ -82,28 +79,13 @@ rule het_vcf_file:
 
 rule chamber_allele_call_accuracies:
     params: job_name = 'chamber_allele_call_accuracies.{cut}'
-    input:  ccf = 'output/chamber_allele_calls.SNPs_only.out',
+    input:  ccf = 'output/chamber_allele_calls.out',
             gff = CGI_SNPs1,
             vcf = CGI_SNPs2,
-            triallelic = 'triallelic/triallelic.out'
     output: rof = 'accuracy_reports/cutoff{cut}.results',
             mof = 'accuracy_reports/cutoff{cut}.mismatches'
     run:
-        caca.chamber_allele_call_accuracy(input.ccf,input.gff,input.vcf,input.triallelic,(1.0-10**(-1*int(wildcards.cut))),output.rof,output.mof)
-
-rule combine_trallelic:
-    params: job_name = 'combine_trallelic'
-    input:  expand('triallelic/split/{r}.out',r=regions)
-    output: 'triallelic/triallelic.out'
-    shell: 'cat {input} > {output}'
-
-rule call_triallelic:
-    params: job_name = 'call_trallelic.{r}'
-    input:  'pileups/split/{r}.pileup'
-    output: 'triallelic/split/{r}.out'
-    run:
-        import call_triallelic as ta
-        ta.call_triallelic(input[0], output[0], mode='SNPs_only')
+        caca.chamber_allele_call_accuracy(input.ccf,input.gff,input.vcf,(1.0-10**(-1*int(wildcards.cut))),output.rof,output.mof)
 
 rule combine_base_calls:
     params: job_name = 'combine_base_calls'
@@ -113,7 +95,8 @@ rule combine_base_calls:
 
 rule call_alleles:
     params: job_name = 'call_alleles.{r}'
-    input:  'pileups/split/{r}.pileup',
+    input:  pileup = 'pileups/split/{r}.pileup',
+            boundary_files = expand('fragment_boundary_beds/{ce}/ch{ch}.bed',ch=chambers,ce=cells),
             'parameters/cov_frac_dist.p',
             'parameters/p_null.p',
             'parameters/ch_priors.p',
@@ -123,8 +106,8 @@ rule call_alleles:
             'parameters/omega.p'
     output: 'output/split/{r}.out'
     run:
-        import SissorHands
-        SissorHands.call_chamber_alleles(input[0], output[0])
+        import sissorhands
+        sissorhands.call_chamber_alleles(input.pileup, output[0], input.boundary_files)
 
 rule estimate_parameters:
     params: job_name = 'estimate_parameters'
@@ -154,37 +137,37 @@ rule obtain_counts_parallel:
             'parameters/split/strand_coverage_counts.{r}.p',
             'parameters/split/total_sampled_cell_positions.{r}.p',
     run:
-        estimate_parameters.obtain_counts_parallel(input[0], wildcards.r)
+        estimate_parameters.obtain_counts_parallel(input[0], boundary_files, inputwildcards.r)
 
 rule pileup:
     params: job_name = 'pileup.{r}',
             chrom = lambda wildcards: wildcards.r.split('.')[0],
             start = lambda wildcards: wildcards.r.split('.')[1],
             stop  = lambda wildcards: wildcards.r.split('.')[2]
-    input:  bams = expand('bams/{s}/ch{c}.bam',s=samples,c=chambers),
-            bais = expand('bams/{s}/ch{c}.bam.bai',s=samples,c=chambers)
+    input:  bams = expand('bams/{ce}/ch{ch}.bam',ch=chambers,ce=cells),
+            bais = expand('bams/{ce}/ch{ch}.bam.bai',ch=chambers,ce=cells)
     output: pileup = 'pileups/split/{r}.pileup'
     shell:  '{SAMTOOLS} mpileup --region {params.chrom}:{params.start}-{params.stop} --adjust-MQ 50 --max-depth 100 --output-MQ --min-MQ 30 --min-BQ 20 --fasta-ref {HG19} --output {output.pileup} {input.bams}'
 
 rule index_bam:
-    params: job_name = 'index_bam{s}.{c}'
-    input:  bam = 'bams/{s}/ch{c}.bam'
-    output: bai = 'bams/{s}/ch{c}.bam.bai'
+    params: job_name = 'index_bam{ce}.{ch}'
+    input:  bam = 'bams/{ce}/ch{ch}.bam'
+    output: bai = 'bams/{ce}/ch{ch}.bam.bai'
     shell:  '{SAMTOOLS} index {input.bam} {output.bai}'
 
 # PGP1_22 and PGP1_A1 don't have chr before chromosome labels. necessary for pileup to include reference
 # credit to petervangalen and Pierre Lindenbaum for this rule's code: https://www.biostars.org/p/13462/
 
 rule fix_sam:
-    params: job_name = 'fix_sam.{s}.{c}'
-    input:  sam = 'bams/{s}/old.ch{c}.sam'
-    output: bam = 'bams/{s}/ch{c}.bam'
+    params: job_name = 'fix_sam.{ce}.{ch}'
+    input:  sam = 'bams/{ce}/old.ch{ch}.sam'
+    output: bam = 'bams/{ce}/ch{ch}.bam'
     run:
         fix_sam.fix_sam(input.sam,output.bam)
 
 rule bam2sam:
-    params: job_name = 'bam2sam.{s}.{c}'
-    input:  'bams/{s}/old.ch{c}.bam'
+    params: job_name = 'bam2sam.{ce}.{ce}'
+    input:  'bams/{ce}/old.ch{ce}.bam'
     output: temp(rules.fix_sam.input)
     shell: '{SAMTOOLS} view -h {input} > {output}'
 
