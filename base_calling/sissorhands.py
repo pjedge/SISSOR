@@ -17,7 +17,7 @@ def addlogs(a,b):
     else:
         return b + log10(1 + pow(10, a - b))
 
-        
+
 from collections import defaultdict
 desc = 'Use cross-chamber information to call chamber alleles in SISSOR data'
 
@@ -65,7 +65,7 @@ for cell in cells:
 
 
 def parseargs():
-    
+
     parser = argparse.ArgumentParser(description=desc)
     parser.add_argument('-i', '--input_file', nargs='?', type = str, help='input file, pileup with n cells x 24 chambers', default=default_input_file)
     parser.add_argument('-o', '--output_file', nargs='?', type = str, help='file to write output to', default=default_output_file)
@@ -77,24 +77,24 @@ def parseargs():
 
 
 ###############################################################################
-# LOAD PARAMETERS
+# PARAMETERS
 ###############################################################################
 
-p_null = pickle.load(open("{}/p_null.p".format(parameters_dir), "rb" )) # estimated p_null, the probability of a strand not being sampled.
-ch_priors = pickle.load(open("{}/ch_priors.p".format(parameters_dir), "rb" )) # prior probability of sampling from a chamber
-cov_frac_dist = pickle.load(open( "parameters/cov_frac_dist.p", "rb")) # PROBABILITY OF SEEING PARENT 1 ALLELE IN MIXED ALLELE CHAMBER
-hom_config_probs = pickle.load(open( "parameters/hom_config_probs.p", "rb")) # STRAND-TO-CHAMBER CONFIGURATIONS
-het_config_probs = pickle.load(open( "parameters/het_config_probs.p", "rb"))
-genotype_priors = pickle.load(open( "parameters/genotype_priors.p", "rb"))
-omega = pickle.load(open( "parameters/omega.p", "rb")) # per-base probability of MDA error
-omega_nolog = 10**omega
+## INITIALIZED AS None TO ENSURE GLOBAL ACCESS
+## READ THEM IN LATER USING initialize_parameters() FUNCTION
+
+p_null = None # estimated p_null, the probability of a strand not being sampled.
+ch_priors = None # prior probability of sampling from a chamber
+cov_frac_dist = None # PROBABILITY OF SEEING PARENT 1 ALLELE IN MIXED ALLELE CHAMBER
+hom_config_probs = None # STRAND-TO-CHAMBER CONFIGURATIONS
+het_config_probs = None
+genotype_priors = None
+omega = None # per-base probability of MDA error
+omega_nolog = None
 
 MDA_ERR = 1e-5 # the probability of consensus error due to MDA
 MDA_COR = log10(1 - MDA_ERR)
 MDA_ERR = log10(MDA_ERR) - log10(3) # the log probability of an MDA error, divided by 3
-
-
-
 
 # INPUT
 # G: a tuple that specifies genotype e.g. ('A','T')
@@ -252,7 +252,7 @@ def compute_caches():
         one_allele_cache[(qual,True)] = log10((1.0-qual)*(1.0-omega_nolog) + omega_nolog*qual)
         one_allele_cache[(qual,False)] = log10(omega_nolog*(1.0-qual) + (1-omega_nolog)*qual)
 
-compute_caches()
+
 
 def pr_one_chamber_data(alleles_present, base_data, qual_data, fast_mode):
 
@@ -264,7 +264,7 @@ def pr_one_chamber_data(alleles_present, base_data, qual_data, fast_mode):
     if len(alleles_present) == 1:
 
         for base,qual in zip(base_data, qual_data):
-            
+
             p += one_allele_cache[(qual, (alleles_present[0] == base))]
 
     elif len(alleles_present) == 2:
@@ -381,9 +381,9 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
                     else:
                         print("ERROR")
                         exit(1)
-                    
+
                     if len(alleles_present) == 1:
-                        
+
                         # we must account for the fact that the entire consensus may
                         # be wrong due to MDA error
                         p0 = tinylog
@@ -392,22 +392,22 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
                                 p1 = pr_one_ch[(i,j,alleles_present)] + MDA_COR
                             else:
                                 p1 = pr_one_ch[(i,j,(base,))] + MDA_ERR
-                            
+
                             p0 = addlogs(p0, p1)
 
-                        p += p0              
+                        p += p0
                     else:
 
                         allele1 = alleles_present[0]
                         allele2 = alleles_present[1]
-                        
+
                         p0 = tinylog
                         #prob_tot = tinylog
                         for base1, base2 in genotypes:
-                            
+
                             x1 = MDA_COR if base1 == allele1 else MDA_ERR
                             x2 = MDA_COR if base2 == allele2 else MDA_ERR
-                            
+
                             if (base1,base2) == alleles_present:
                                 p1 = pr_one_ch[(i,j,(base1,base2))] + MDA_COR + MDA_COR
                                 p2 = pr_one_ch[(i,j,(base1,base2))] + MDA_ERR + MDA_ERR
@@ -420,11 +420,11 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
                             else:
                                 p1 = pr_one_ch[(i,j,(base1,base2))] + x1 + x2 + log10(2)
                                 #prob_tot = addlogs(prob_tot, x1+x2+log10(2))
-                            
+
                             p0 = addlogs(p0, p1)
-                            
+
                         #assert(abs(1 - 10**prob_tot) < 0.001)
-                            
+
                         p += p0
 
                     assignments.add((i,j,alleles_present))
@@ -433,10 +433,10 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
 
             for assignment in assignments:
                 p_assignment[assignment] = addlogs(p_assignment[assignment], p + genotype_priors[ref_allele][G])
-        
+
         #if p_total == tinylog:
         #    set_trace()
-            
+
         probs[G] = p_total + genotype_priors[ref_allele][G]
 
     # denominator for bayes rule posterior calculation
@@ -549,37 +549,50 @@ def parse_mpileup_base_qual(raw_bd, raw_qd, ref_base):
         assert(b in bases)
 
     return bd, qd
-    
+
 
 def parse_bedfile(input_file):
-    
+
     boundaries = []
     with open(input_file,'r') as inf:
         for line in inf:
-            
+
             if len(line) < 3:
                 continue
-            
+
             el = line.strip().split('\t')
-            
+
             chrom = el[0]
             start = int(el[1])
             stop  = int(el[2])
-            
+
             boundaries.append((chrom, start, stop))
-        
+
     return boundaries
-    
+
 # boundary_files[cell*chamber+chamber] should hold name of bed file with fragment boundaries
-    
+
+def initialize_parameters():
+    compute_caches()
+    p_null = pickle.load(open("{}/p_null.p".format(parameters_dir), "rb" )) # estimated p_null, the probability of a strand not being sampled.
+    ch_priors = pickle.load(open("{}/ch_priors.p".format(parameters_dir), "rb" )) # prior probability of sampling from a chamber
+    cov_frac_dist = pickle.load(open( "parameters/cov_frac_dist.p", "rb")) # PROBABILITY OF SEEING PARENT 1 ALLELE IN MIXED ALLELE CHAMBER
+    hom_config_probs = pickle.load(open( "parameters/hom_config_probs.p", "rb")) # STRAND-TO-CHAMBER CONFIGURATIONS
+    het_config_probs = pickle.load(open( "parameters/het_config_probs.p", "rb"))
+    genotype_priors = pickle.load(open( "parameters/genotype_priors.p", "rb"))
+    omega = pickle.load(open( "parameters/omega.p", "rb")) # per-base probability of MDA error
+    omega_nolog = 10**omega
+
 def call_chamber_alleles(input_file, output_file, boundary_files, SNPs_only=False):
-        
+
+    initialize_parameters()
+
     fragment_boundaries = [[] for i in range(n_cells)]
     for cell in range(0,n_cells):  # for each cell
         for chamber in range(0,n_chambers):
             bfile = boundary_files[cell*n_chambers + chamber]
             fragment_boundaries[cell].append(parse_bedfile(bfile))
-            
+
     mixed_allele_priors = compute_mixed_allele_priors()
     processed = 0
     with open(input_file,'r') as ipf, open(output_file,'w') as opf:
@@ -596,26 +609,26 @@ def call_chamber_alleles(input_file, output_file, boundary_files, SNPs_only=Fals
             chrom = el[0]
             pos   = int(el[1]) - 1
             ref_base = str.upper(el[2])
-            
+
             if ref_base == 'N':
                 continue
             assert(ref_base in bases)
-            
+
             total_nonref = 0
             base_count = {'A':0,'G':0,'T':0,'C':0}
             for cell_num in range(n_cells):
                 for ch_num in range(n_chambers):
-            
+
                     # ensure that position falls inside a called fragment
                     if fragment_boundaries[cell_num][ch_num] == []:
                         continue
-                    
+
                     f_chrom, f_start, f_end = fragment_boundaries[cell_num][ch_num][0]
-                    
+
                     # if we're behind fragment start, skip this spot
                     if chr_num[chrom] < chr_num[f_chrom] or (chrom == f_chrom and pos < f_start):
                         continue
-                    
+
                     # if we're ahead of fragment start, skip to later fragment boundaries
                     while 1:
                         f_chrom, f_start, f_end = fragment_boundaries[cell_num][ch_num][0]
@@ -623,14 +636,14 @@ def call_chamber_alleles(input_file, output_file, boundary_files, SNPs_only=Fals
                             fragment_boundaries[cell_num][ch_num].pop(0)
                         else:
                             break
-                    
+
                     # if we're not inside fragment, continue
                     if not(chrom == f_chrom and pos >= f_start and pos < f_end):
                         continue
-                                        
+
                     flat_ix = cell_num * n_chambers + ch_num
                     col_ix = 3 + 4 * flat_ix
-                    
+
                     depth = int(el[col_ix])
 
                     if depth < coverage_cut or el[col_ix + 1] == '*':
@@ -718,7 +731,7 @@ if __name__ == '__main__':
     t1 = time.time()
     args = parseargs()
     n_cells = args.num_cells
-        
+
     call_chamber_alleles(args.input_file, args.output_file, args.fragment_boundaries, False)
     t2 = time.time()
 

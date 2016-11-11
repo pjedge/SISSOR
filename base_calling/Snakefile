@@ -4,7 +4,8 @@ import random
 import estimate_parameters
 import fix_sam
 import chamber_allele_call_accuracy as caca
-#import base_calls_to_vcf
+import sissorhands
+import base_calls_to_vcf
 
 localrules: all, simlinks
 
@@ -67,15 +68,13 @@ for chrom, chrlen in hg19_size_list:
         chunklist.append((chrom,start,end))
 
 regions = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in chunklist]
-regions = ['chr2.170000001.175000000']
 
 rule het_vcf_file:
     params: job_name = 'het_vcf_file.{cut}'
-    input:  ccf = 'output/chamber_allele_calls.out',
-            triallelic = 'triallelic/triallelic.out'
+    input:  ccf = 'output/chamber_allele_calls.out'
     output: vcf = 'het_vcfs/cutoff{cut}.whole_genome.vcf',
     run:
-        base_calls_to_vcf.base_calls_to_vcf(input.ccf,input.triallelic,(1.0-10**(-1*int(wildcards.cut))),output.vcf)
+        base_calls_to_vcf.base_calls_to_vcf(input.ccf,(1.0-10**(-1*int(wildcards.cut))),output.vcf)
 
 rule chamber_allele_call_accuracies:
     params: job_name = 'chamber_allele_call_accuracies.{cut}'
@@ -106,7 +105,6 @@ rule call_alleles:
             omega = 'parameters/omega.p'
     output: 'output/split/{r}.out'
     run:
-        import sissorhands
         sissorhands.call_chamber_alleles(input.pileup, output[0], input.boundary_files)
 
 rule estimate_parameters:

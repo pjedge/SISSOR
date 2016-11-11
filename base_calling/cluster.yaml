@@ -18,4 +18,4 @@ call_alleles:
 
 pileup:
     ppn: 1
-    walltime: '50:00:00'
+    walltime: '10:00:00'
