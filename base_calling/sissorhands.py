@@ -26,7 +26,7 @@ desc = 'Use cross-chamber information to call chamber alleles in SISSOR data'
 ###############################################################################
 
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
-coverage_cut = 3
+coverage_cut = 2 # less than this many reads in a chamber are ignored
 max_cov = 100
 min_nonref = 5
 chroms = ['chr{}'.format(i) for i in range(1,23)] + ['chrX','chrY']
@@ -40,6 +40,7 @@ numbers = '0123456789'
 base_letters = 'ACGTacgt'
 mixed_alleles = [('A',),('T',),('G',),('C',), ('A', 'T'),('A', 'G'),('A', 'C'),('T', 'G'),('T', 'C'),('G', 'C')]
 tinylog = -1e5
+INDEL_COUNT_LIMIT = 3
 
 chr_num = dict()
 for i,chrom in enumerate(chroms):
@@ -83,14 +84,14 @@ def parseargs():
 ## INITIALIZED AS None TO ENSURE GLOBAL ACCESS
 ## READ THEM IN LATER USING initialize_parameters() FUNCTION
 
-p_null = None # estimated p_null, the probability of a strand not being sampled.
-ch_priors = None # prior probability of sampling from a chamber
-cov_frac_dist = None # PROBABILITY OF SEEING PARENT 1 ALLELE IN MIXED ALLELE CHAMBER
-hom_config_probs = None # STRAND-TO-CHAMBER CONFIGURATIONS
-het_config_probs = None
-genotype_priors = None
-omega = None # per-base probability of MDA error
-omega_nolog = None
+p_null = pickle.load(open("{}/p_null.p".format(parameters_dir), "rb" )) # estimated p_null, the probability of a strand not being sampled.
+ch_priors = pickle.load(open("{}/ch_priors.p".format(parameters_dir), "rb" )) # prior probability of sampling from a chamber
+cov_frac_dist = pickle.load(open( "parameters/cov_frac_dist.p", "rb")) # PROBABILITY OF SEEING PARENT 1 ALLELE IN MIXED ALLELE CHAMBER
+hom_config_probs = pickle.load(open( "parameters/hom_config_probs.p", "rb")) # STRAND-TO-CHAMBER CONFIGURATIONS
+het_config_probs = pickle.load(open( "parameters/het_config_probs.p", "rb"))
+genotype_priors = pickle.load(open( "parameters/genotype_priors.p", "rb"))
+omega = pickle.load(open( "parameters/omega.p", "rb")) # per-base probability of MDA error
+omega_nolog = 10**omega
 
 MDA_ERR = 1e-5 # the probability of consensus error due to MDA
 MDA_COR = log10(1 - MDA_ERR)
@@ -252,7 +253,7 @@ def compute_caches():
         one_allele_cache[(qual,True)] = log10((1.0-qual)*(1.0-omega_nolog) + omega_nolog*qual)
         one_allele_cache[(qual,False)] = log10(omega_nolog*(1.0-qual) + (1-omega_nolog)*qual)
 
-
+compute_caches()
 
 def pr_one_chamber_data(alleles_present, base_data, qual_data, fast_mode):
 
@@ -445,12 +446,21 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
         total = addlogs(total,p)
 
     res = []
+    SNP = False
+    max_posterior = -1
+    max_G = ('N','N')
     for G in genotypes:
         if G in probs:
-            posterior = probs[G] - total
-            res.append((G,10**posterior))
+            posterior = 10**(probs[G] - total)
+            res.append((G,posterior))
+            if posterior > max_posterior:
+                max_posterior = posterior
+                max_G = G
         else:
             res.append((G,0.0))
+
+    if max_G != (ref_allele,ref_allele):
+        SNP = True
 
     out_str = ';'.join(['{}:{}'.format(''.join(g),p) for g,p in res])
     outline_el[0] = out_str
@@ -471,15 +481,24 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
                 total = addlogs(total,p)
 
             res = []
+            max_allele = ('N',)
+            max_posterior = -1
             for a,p in probs:
-                posterior = p - total
-                res.append((a,10**posterior))
+                posterior = 10**(p - total)
+                res.append((a,posterior))
+
+                if posterior > max_posterior:
+                    max_posterior = posterior
+                    max_allele = a
+
+            if max_allele != (ref_allele,):
+                SNP = True
 
             out_str = ';'.join(['{}:{}'.format(''.join(a),p) for a,p in res])
 
             outline_el[1 + cell*n_chambers + chamber] = out_str
 
-    return outline_el
+    return outline_el, SNP
 
 ###############################################################################
 # MAIN FUNCTION AND PARSING
@@ -495,6 +514,8 @@ def parse_mpileup_base_qual(raw_bd, raw_qd, ref_base):
     bd = [] # base data
     qd = [] # qual data
 
+    indel_count = len(re.findall(caret_money, raw_bd))
+
     if not re.search(plus_or_minus,raw_bd):
 
         bd = str.upper(re.sub(caret_money,'', raw_bd))
@@ -502,7 +523,7 @@ def parse_mpileup_base_qual(raw_bd, raw_qd, ref_base):
         qd = [10**((ord(q) - 33) * -0.1) for q in raw_qd]
         paired_bd_qd = [(b,q) for b,q in zip(bd,qd) if b not in ['>','<','*','n','N']]
         if len(paired_bd_qd) < coverage_cut:
-            return [],[]
+            return [],[], 0
 
         bd, qd = zip(*paired_bd_qd)
         bd = list(bd)
@@ -525,6 +546,7 @@ def parse_mpileup_base_qual(raw_bd, raw_qd, ref_base):
                 i += 1
                 j += 1
             elif raw_bd[i] == '+' or raw_bd[i] == '-': # indel
+                indel_count += 1
                 num = int(raw_bd[i+1])
                 i += 2
                 while(raw_bd[i] in numbers):
@@ -548,7 +570,7 @@ def parse_mpileup_base_qual(raw_bd, raw_qd, ref_base):
     for b in bd:
         assert(b in bases)
 
-    return bd, qd
+    return bd, qd, indel_count
 
 
 def parse_bedfile(input_file):
@@ -572,20 +594,7 @@ def parse_bedfile(input_file):
 
 # boundary_files[cell*chamber+chamber] should hold name of bed file with fragment boundaries
 
-def initialize_parameters():
-    compute_caches()
-    p_null = pickle.load(open("{}/p_null.p".format(parameters_dir), "rb" )) # estimated p_null, the probability of a strand not being sampled.
-    ch_priors = pickle.load(open("{}/ch_priors.p".format(parameters_dir), "rb" )) # prior probability of sampling from a chamber
-    cov_frac_dist = pickle.load(open( "parameters/cov_frac_dist.p", "rb")) # PROBABILITY OF SEEING PARENT 1 ALLELE IN MIXED ALLELE CHAMBER
-    hom_config_probs = pickle.load(open( "parameters/hom_config_probs.p", "rb")) # STRAND-TO-CHAMBER CONFIGURATIONS
-    het_config_probs = pickle.load(open( "parameters/het_config_probs.p", "rb"))
-    genotype_priors = pickle.load(open( "parameters/genotype_priors.p", "rb"))
-    omega = pickle.load(open( "parameters/omega.p", "rb")) # per-base probability of MDA error
-    omega_nolog = 10**omega
-
 def call_chamber_alleles(input_file, output_file, boundary_files, SNPs_only=False):
-
-    initialize_parameters()
 
     fragment_boundaries = [[] for i in range(n_cells)]
     for cell in range(0,n_cells):  # for each cell
@@ -616,6 +625,7 @@ def call_chamber_alleles(input_file, output_file, boundary_files, SNPs_only=Fals
 
             total_nonref = 0
             base_count = {'A':0,'G':0,'T':0,'C':0}
+            indel_count = 0
             for cell_num in range(n_cells):
                 for ch_num in range(n_chambers):
 
@@ -631,6 +641,8 @@ def call_chamber_alleles(input_file, output_file, boundary_files, SNPs_only=Fals
 
                     # if we're ahead of fragment start, skip to later fragment boundaries
                     while 1:
+                        if fragment_boundaries[cell_num][ch_num] == []:
+                            break
                         f_chrom, f_start, f_end = fragment_boundaries[cell_num][ch_num][0]
                         if chr_num[chrom] > chr_num[f_chrom] or (chrom == f_chrom and pos >= f_end):
                             fragment_boundaries[cell_num][ch_num].pop(0)
@@ -652,9 +664,11 @@ def call_chamber_alleles(input_file, output_file, boundary_files, SNPs_only=Fals
                     raw_bd = el[col_ix + 1]
                     raw_qd = el[col_ix + 2]
 
-                    bd, qd = parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+                    bd, qd, ic = parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
 
-                    if len(bd) <= 1:
+                    indel_count += ic
+
+                    if len(bd) < coverage_cut:
                         continue
 
                     nonzero_chambers[cell_num].append(ch_num)
@@ -674,6 +688,9 @@ def call_chamber_alleles(input_file, output_file, boundary_files, SNPs_only=Fals
 
             fast_mode = False
             condensed_genotype_set = None
+
+            if indel_count > INDEL_COUNT_LIMIT:
+                tags.append('ADJACENT_INDEL_OR_CLIP')
 
             if total_nonref < min_nonref:
                 fast_mode = True # skip heavy computation for likely non-SNV
@@ -716,11 +733,16 @@ def call_chamber_alleles(input_file, output_file, boundary_files, SNPs_only=Fals
             if nonzero_chamber_count > 0 and not too_many_chambers:
 
                 pr_one_ch = precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers, fast_mode)
-                outline_el = pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_base, condensed_genotype_set)
+                outline_el, SNP = pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_base, condensed_genotype_set)
+
+                if SNP:
+                    tags.append('SNP')
 
             outline_el = [chrom, str(pos+1), ref_base] + outline_el
             tag_info = ';'.join(tags) if tags != [] else 'N/A'
             outline_el.append(tag_info)
+            outline_el.append('PILEUP:')
+            outline_el = outline_el + el[3:]
             outline = '\t'.join(outline_el)
 
             print(outline, file=opf)

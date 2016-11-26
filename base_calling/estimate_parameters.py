@@ -16,7 +16,6 @@ from pdb import set_trace
 from collections import defaultdict
 import random
 import bisect
-from sissorhands import addlogs, parse_bedfile
 import math
 if False:
     set_trace() # to dodge warnings that pdb isn't being used.
@@ -45,6 +44,31 @@ for i,chrom in enumerate(chroms):
 ###############################################################################
 # HELPER FUNCTIONS
 ###############################################################################
+
+def addlogs(a,b):
+    if a > b:
+        return a + log10(1 + pow(10, b - a))
+    else:
+        return b + log10(1 + pow(10, a - b))
+
+def parse_bedfile(input_file):
+
+    boundaries = []
+    with open(input_file,'r') as inf:
+        for line in inf:
+
+            if len(line) < 3:
+                continue
+
+            el = line.strip().split('\t')
+
+            chrom = el[0]
+            start = int(el[1])
+            stop  = int(el[2])
+
+            boundaries.append((chrom, start, stop))
+
+    return boundaries
 
 # product of list
 def prod(iterable): # credit to: http://stackoverflow.com/questions/7948291/is-there-a-built-in-product-in-python
@@ -330,7 +354,7 @@ def obtain_counts_parallel(input_file, boundary_files, suffix=''):
         for chamber in range(0,n_chambers):
             bfile = boundary_files[cell*n_chambers + chamber]
             fragment_boundaries[cell].append(parse_bedfile(bfile))
-    
+
     chrX_covs = defaultdict(int)
     chamber_position_counts = defaultdict(int)
     strand_coverage_counts = defaultdict(int)
@@ -357,26 +381,28 @@ def obtain_counts_parallel(input_file, boundary_files, suffix=''):
                     # ensure that position falls inside a called fragment
                     if fragment_boundaries[cell_num][ch_num] == []:
                         continue
-                    
+
                     f_chrom, f_start, f_end = fragment_boundaries[cell_num][ch_num][0]
-                    
+
                     # if we're behind fragment start, skip this spot
                     if chr_num[chrom] < chr_num[f_chrom] or (chrom == f_chrom and pos < f_start):
                         continue
-                    
+
                     # if we're ahead of fragment start, skip to later fragment boundaries
                     while 1:
+                        if fragment_boundaries[cell_num][ch_num] == []:
+                            break
                         f_chrom, f_start, f_end = fragment_boundaries[cell_num][ch_num][0]
                         if chr_num[chrom] > chr_num[f_chrom] or (chrom == f_chrom and pos >= f_end):
                             fragment_boundaries[cell_num][ch_num].pop(0)
                         else:
                             break
-                    
+
                     # if we're not inside fragment, continue
                     if not(chrom == f_chrom and pos >= f_start and pos < f_end):
                         continue
-                    
-                    
+
+
                     flat_ix = cell_num * n_chambers + ch_num
                     col_ix = 3 + 4 * flat_ix
                     depth = int(el[col_ix])
