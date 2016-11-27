@@ -6,15 +6,86 @@ Created on Mon Oct  3 18:29:04 2016
 @author: peter
 """
 import pickle
-from pyliftover import LiftOver
 import re
-lo = LiftOver('hg38ToHg19.over.chain')
 GMS_LIMIT = 0.5
 chroms = set(['chr{}'.format(i) for i in range(1,23)])
 bases = {'A','T','G','C'}
 
 ref_allele_re = re.compile('ref_allele ([ACGT])')
 
+def split_vcf(input_vcf, chunklist, output_vcfs):
+
+    regions_output = list(zip(chunklist, output_vcfs))
+    (chrom, start, stop), outputfile = regions_output.pop(0)
+    output = open(outputfile, 'w')
+
+    with open(input_vcf,'r') as vcf:
+        for line in vcf:
+            if line[0] == '#' or len(line) < 3:
+                continue
+
+            vcf_line = line.strip().split('\t')
+
+            vcf_chrom = vcf_line[0]
+            vcf_pos = int(vcf_line[1])
+
+            if vcf_chrom != chrom or vcf_pos > stop:
+                output.close()
+                done = False
+                while not (vcf_chrom == chrom and vcf_pos >= start and vcf_pos <= stop):
+                    if len(regions_output) == 0:
+                        done = True
+                        break
+                    (chrom, start, stop), outputfile = regions_output.pop(0)
+                if done:
+                    break
+                assert(vcf_chrom == chrom)
+                assert(vcf_pos >= start)
+                assert(vcf_pos <= stop)
+                output = open(outputfile, 'w')
+
+            # write to lifted over vcf
+            print(line,end='',file=output)
+
+    if not output.closed:
+        output.close()
+
+# this takes the genome mappability score (GMS) files and splits them into
+# convenient 5 Mb chunks, corresponding to regions called by sissorhands
+def split_gms(infiles, chunklist, outputlst):
+
+    chunks_output = list(zip(chunklist, outputlst))
+
+    for infile in infiles:
+        (chrom, start, stop), outputfile = chunks_output.pop(0)
+        assert(start == 1)              # should be beginning of chrom
+        assert(chrom+'.gms' in infile)  # file should have chrom name
+        output = open(outputfile,'w')
+        with open(infile,'r') as gms:
+            for line in gms:
+                if line[0] == '#' or len(line) < 3:
+                    continue
+                el = line.strip().split('\t')
+
+                gms_chrom     = el[0]
+                gms_pos       = int(el[1])
+
+                if gms_pos > stop:
+                    output.close()
+                    if chunks_output == []:
+                        break
+                    (chrom, start, stop), outputfile = chunks_output.pop(0)
+                    output = open(outputfile,'w')
+
+                # make sure we're really on the current region
+                assert(gms_chrom == chrom)
+                assert(gms_pos >= start)
+                assert(gms_pos <= stop)
+
+                print(line,end='',file=output)
+
+    if not output.closed:
+        output.close()
 
 # chamber call file has results from SISSOR cross-chamber allele calls
 # GFF file has set of known alleles for individual (for comparison)
