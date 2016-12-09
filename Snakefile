@@ -206,9 +206,13 @@ rule generate_fragmatrix:
             vcfs     = expand('sissor_project/data/PGP1_VCFs/{c}.vcf',c=chroms)
     run:
         odir = 'sissor_project/data/PGP1_ALL/augmented_fragmat'
+
+        # generate fragment matrix from sissorhands base calls
         create_hapcut_fragment_matrix_CCF(chamber_call_file=input.ccf, fragment_boundary_files=input.bounds, output_dir=odir)
+
+        #split vcf file into separate chromosome VCF files
         for chrom in chroms:
-            shell('grep {chrom} {input.vcf} > sissor_project/data/PGP1_VCFs/{chrom}.vcf')
+            shell('grep -P "^{chrom}\t" {input.vcf} > sissor_project/data/PGP1_VCFs/{chrom}.vcf')
 
 # COMBINE FRAGMENT MATRICES
 '''
