@@ -19,6 +19,7 @@ import plot_data
 import os
 from os.path import join
 from create_hapcut_fragment_matrix import create_hapcut_fragment_matrices_freebayes
+from create_hapcut_fragment_matrix_CCF import create_hapcut_fragment_matrix_CCF
 from fix_chamber_contamination import fix_chamber_contamination
 import pickle
 from collections import defaultdict
@@ -196,6 +197,19 @@ rule fix_fragmat:
         for i,v,o in zip(input.P_ALL, input.var_vcfs, output.fixed):
             fix_chamber_contamination(i,v,o,threshold=2, min_coverage=mincov,mode=mode)
 
+rule generate_fragmatrix:
+    params: job_name = 'generate_fragmatrix'
+    input:  ccf      = 'base_calling/het_vcfs/cutoff3/whole_genome.out',
+            vcf      = 'base_calling/het_vcfs/cutoff3/whole_genome.vcf',
+            bounds   = expand('base_calling/fragment_boundary_beds/{ce}/ch{ch}.bed',ch=chambers,ce=cells),
+    output: fragmat  = expand('sissor_project/data/PGP1_ALL/augmented_fragmat/{c}',c=chroms),
+            vcfs     = expand('sissor_project/data/PGP1_VCFs/{c}.vcf',c=chroms)
+    run:
+        odir = 'sissor_project/data/PGP1_ALL/augmented_fragmat'
+        create_hapcut_fragment_matrix_CCF(chamber_call_file=input.ccf, fragment_boundary_files=input.bounds, output_dir=odir)
+        for chrom in chroms:
+            shell('grep {chrom} {input.vcf} > sissor_project/data/PGP1_VCFs/{chrom}.vcf')
+
 # COMBINE FRAGMENT MATRICES
 '''
 rule merge_fragmat:
@@ -229,6 +243,7 @@ rule create_augmented_fragmat:
         create_hapcut_fragment_matrices_freebayes(input.ploidy1_vcfs, input.ploidy2_vcfs, input.beds, wildcards.s, chambers_pad, input.var_vcfs, output_dir, hets_in_seq=True)
 '''
 # simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
+
 rule simlinks:
     input:
         expand("{DIR}/PGP1_21_ch{chpad}.freebayes.remap.depth.new.vcf",DIR=config['PGP1_21_ploidy1'],chpad=chambers_pad),
@@ -275,6 +290,7 @@ rule clean:
         mv sissor_project/data/PGP1_22 sissor_project/data/bak || true 2>/dev/null
         mv sissor_project/data/PGP1_A1 sissor_project/data/bak || true 2>/dev/null
         mv sissor_project/data/PGP1_ALL sissor_project/data/bak || true 2>/dev/null
+        mv sissor_project/data/PGP1_VCFs sissor_project/data/bak || true 2>/dev/null
         '''
 
 rule dummy:
