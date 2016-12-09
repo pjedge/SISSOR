@@ -59,9 +59,10 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file=in1, fragment_boundary_f
 
             if ccf_chrom != prev_ccf_chrom:
                 snp_ix = -1
+            prev_ccf_chrom = ccf_chrom
 
             snp_ix += 1
-            
+
             ccf_pos   = int(ccf_line[1])
             ref_allele = {ccf_line[2]}
 
@@ -151,7 +152,7 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file=in1, fragment_boundary_f
                 fragment_list[i][-1].append((snp_ix, ccf_chrom, ccf_pos, binary_allele, q_char, frg_start, frg_end, cell, ch_num))
             
                 
-                
+        
     lines = defaultdict(list)
     fragcount = 0
         # now take this information and make it into a fragment matrix file line
