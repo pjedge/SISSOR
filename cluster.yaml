@@ -2,7 +2,7 @@ __default__:
     email:           pedge@eng.ucsd.edu
     working_dir:     /home/pedge/git/SISSOR
     queue:           hotel
-    group:           bansal-group
+    group:           bafna-group
     qsub_stdout_dir: sissor_project/stdout
     job_name:        snakemake_job
     ppn:             2

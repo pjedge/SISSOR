@@ -2,19 +2,17 @@ from collections import defaultdict
 import pickle
 import random
 import estimate_parameters
-import fix_sam
+#import fix_sam
 import chamber_allele_call_accuracy as caca
 import base_calls_to_vcf
-import liftover
-from split_gms import split_gms
 
 localrules: all, simlinks
 
 # cutoff values are coded as 1.0-10**(-1*x)
 # so 3 => 0.999
 # and 5 => 0.99999
-cutoffs = list(range(4,11))
-
+cutoffs = list(range(1,11))
+het_vcf_cutoffs = list(range(1,6))
 chroms = ['chr{}'.format(i) for i in range(1,23)]
 chunksize = int(5e6)
 
@@ -74,13 +72,13 @@ hg19_size_list = [('chr1', 249250621),
 # create chunks of hg19
 # return list of (chrom,start,stop) tuples. stop is inclusive
 chunklist = []
+
 for chrom, chrlen in hg19_size_list:
     for start in range(1,chrlen+1,chunksize):
         end = start+chunksize-1 if start+chunksize-1 < chrlen else chrlen
         chunklist.append((chrom,start,end))
 
 regions = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in chunklist]
-
 # create chunks of hg19
 # return list of (chrom,start,stop) tuples. stop is inclusive
 grch38_chunklist = []
@@ -93,8 +91,9 @@ grch38_regions = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in gr
 
 rule all:
     input:
-        #expand('wgs/freebayes/{r}.vcf',r=grch38_regions)
-        expand('accuracy_reports/cutoff{cut}.results',cut=cutoffs)
+        expand('het_vcfs/cutoff{cut}/whole_genome.vcf',cut=het_vcf_cutoffs)
+        #'accuracy_reports/new/split/chr2.145000001.150000000/7/mismatches'
+        #expand('accuracy_reports/new/cutoff{cut}.results',cut=cutoffs)
 
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
@@ -103,6 +102,8 @@ grams_DNA_before_MDA  = 0.25e-12  # 0.25 pg
 grams_DNA_after_MDA = 6e-9        # 6 ng
 
 SAMTOOLS = '/opt/biotools/samtools/1.3/bin/samtools'
+PICARD   = '/home/pedge/installed/picard.jar'
+CROSSMAP = '/home/pedge/installed/opt/python/bin/CrossMap.py'
 HG19     = '/oasis/tscc/scratch/pedge/data/genomes/hg19/hg19.fa' #'/home/wkchu/zhang_lab_oasis/resources_v2.8_b37/human_g1k_v37_decoy.fasta'
 GRCH38   = '/oasis/tscc/scratch/pedge/data/genomes/grch38/grch38.fa'
 GRCH38_URL = 'https://www.encodeproject.org/files/GRCh38_no_alt_analysis_set_GCA_000001405.15/@@download/GRCh38_no_alt_analysis_set_GCA_000001405.15.fasta.gz'
@@ -114,41 +115,66 @@ PGP1_21_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/BAM'
 PGP1_22_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/previous/BAM'
 PGP1_A1_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/HiSeqCombinedBAM'
 
-#rule het_vcf_file:
-#    params: job_name = 'het_vcf_file.{cut}'
-#    input:  ccf = 'output/chamber_allele_calls.out'
-#    output: vcf = 'het_vcfs/cutoff{cut}.whole_genome.vcf',
-#    run:
-#        base_calls_to_vcf.base_calls_to_vcf(input.ccf,(1.0-10**(-1*int(wildcards.cut))),output.vcf)
+rule het_vcf_file:
+    params: job_name = 'het_vcf_file.{cut}'
+    input:  ccfs    = expand('output/split/{r}.out',r=regions)
+    output: vcf     = 'het_vcfs/cutoff{cut}/whole_genome.vcf',
+            ccf_het = 'het_vcfs/cutoff{cut}/whole_genome.out'
+    run:
+        base_calls_to_vcf.base_calls_to_vcf(input.ccfs,(1.0-10**(-1*int(wildcards.cut))),output.vcf, output.ccf_het)
 
 rule accuracy_aggregate:
     params: job_name = 'accuracy_aggregate.{cut}'
-    input: counts = expand('accuracy_reports/split/{r}/{{cut}}/counts.p',r=regions),
-            mof = expand('accuracy_reports/split/{r}/{{cut}}/mismatches',r=regions),
-    output: report = 'accuracy_reports/cutoff{cut}.results',
-            mof = 'accuracy_reports/cutoff{cut}.mismatches'
+    input: counts = expand('accuracy_reports/new/split/{r}/{{cut}}/counts.p',r=regions),
+            mof = expand('accuracy_reports/new/split/{r}/{{cut}}/mismatches',r=regions),
+    output: report = 'accuracy_reports/new/cutoff{cut}.results',
+            mof = 'accuracy_reports/new/cutoff{cut}.mismatches'
     run:
         caca.accuracy_aggregate(input.counts,output.report)
         shell('cat {input.mof} > {output.mof}')
 
 rule accuracy_count:
-    params: job_name = 'accuracy_count.{r}'
-    input:  ccf = 'output/split/{r}.out',
+    params: job_name = 'accuracy_count.{chrom}.{start}.{end}'
+    input:  ccf = 'output/split/{chrom}.{start}.{end}.out',
             gff = CGI_SNPs1,
-            gms = 'gms/{r}.gms',
-            wgs_vcf = 'wgs/freebayes_hg19/{r}.vcf',
-    output: counts_lst = expand('accuracy_reports/split/{{r}}/{cut}/counts.p',cut=cutoffs),
-            mof_lst = expand('accuracy_reports/split/{{r}}/{cut}/mismatches',cut=cutoffs),
+            wgs = 'wgs/freebayes_hg19/{chrom}.done',
+            cgi_vcf  = CGI_SNPs2,
+            gms = 'gms/{chrom}.{start}.{end}.gms',
+            hg19 = HG19
+            #wgs_vcf = 'wgs/freebayes_hg19/{r}.vcf',
+    output: counts_lst = temp(expand('accuracy_reports/new/split/{{chrom}}.{{start}}.{{end}}/{cut}/counts.p',cut=cutoffs)),
+            mof_lst = temp(expand('accuracy_reports/new/split/{{chrom}}.{{start}}.{{end}}/{cut}/mismatches',cut=cutoffs)),
     run:
+        reg_chrom = str(wildcards.chrom)
+        reg_start = int(wildcards.start)
+        reg_end   = int(wildcards.end)
+        region = (reg_chrom, reg_start, reg_end)
+        wgs_vcf = 'wgs/freebayes_hg19/{0}.{1}.{2}.vcf'.format(*region)
         for counts, mof, cut in zip(output.counts_lst, output.mof_lst, cutoffs):
-            caca.accuracy_count(input.ccf,input.gff,input.wgs_vcf,input.gms,(1.0-10**(-1*int(cut))),counts,mof)
+            caca.accuracy_count(input.ccf, input.gff, wgs_vcf, input.cgi_vcf, input.gms, input.hg19, region, (1.0-10**(-1*int(cut))), counts, mof)
+
+rule liftover_wgs_SNPs:
+    params: job_name  = 'liftover_SNPs',
+    input:  vcf = 'wgs/wgs_grch38.vcf',
+            chain = 'hg38ToHg19.over.chain',
+            hg19 = HG19
+    output: vcf = 'wgs/wgs_hg19.vcf',
+    shell:
+        '''
+        {CROSSMAP} \
+        vcf \
+        {input.chain} \
+        {input.vcf} \
+        {input.hg19} \
+        {output.vcf}
+        '''
 
 rule split_gms:
     params: job_name  = 'split_gms',
     input:  gms = expand('gms/{c}.gms',c=chroms)
     output: gms = expand('gms/{r}.gms',r=regions)
     run:
-        split_gms(input.gms, chunklist, output.gms)
+        caca.split_gms(input.gms, chunklist, output.gms)
 
 rule download_GMS:
     params: job_name = 'download_GMS.{chr}'
@@ -160,37 +186,40 @@ rule download_GMS:
         '''
 
 rule split_freebayes_wgs:
-    params: job_name  = 'split_freebayes_wgs',
-    input:  vcf = 'wgs/freebayes_hg19/combined.vcf'
-    output: vcfs = expand('wgs/freebayes_hg19/{r}.vcf',r=regions)
+    params: job_name  = 'split_freebayes_wgs_{c}',
+    input:  vcf  = 'wgs/lifted_sorted/{c}.vcf'
+    output: done  = touch('wgs/freebayes_hg19/{c}.done')
     run:
-        liftover.split_vcf(input.vcf, chunklist, output.vcfs)
+        outfiles   = ['wgs/freebayes_hg19/{}.{}.{}.vcf'.format(chrom,start,end) for (chrom,start,end) in chunklist if chrom == wildcards.c]
+        chr_chunks = [(chrom,start,end) for (chrom,start,end) in chunklist if chrom == wildcards.c]
+        caca.split_vcf(input.vcf, chr_chunks, outfiles)
+
+rule sort_freebayes_wgs:
+    params: job_name  = 'sort_freebayes_wgs.{c}',
+    input:  expand('wgs/lifted/{r}.vcf',r=grch38_regions),
+    output: 'wgs/lifted_sorted/{c}.vcf'
+    run:
+        infiles =  [f for (chrom,start,end),f in zip(grch38_chunklist,input) if chrom == wildcards.c]
+        shell('''
+        grep '^#' {infiles[0]} > {output}
+        cat {infiles} |
+        grep -v '^#' |
+        vcf-sort -c -p 4 >> {output}
+        ''')
 
 rule liftover_wgs:
-    params: job_name  = 'liftover_freebayes',
-    input:  vcf = 'wgs/freebayes/combined.vcf',
+    params: job_name  = 'liftover.{r}',
+    input:  vcf = 'wgs/freebayes/{r}.vcf',
             chain = 'hg38ToHg19.over.chain'
-    output: vcf = 'wgs/freebayes_hg19/combined.vcf',
-            rejects = 'wgs/freebayes_hg19/combined_rejects.vcf'
+    output: vcf = 'wgs/lifted/{r}.vcf',
     shell:
         '''
-        java -jar $PICARD LiftoverVcf \
-        I={input.vcf} \
-        O={output.vcf} \
-        CHAIN={chain} \
-        REJECT={output.rejects} \
-        R={HG19} \
-        WARN_ON_MISSING_CONTIG=false
-        '''
-
-rule combine_freebayes_wgs:
-    params: job_name  = 'combine_freebayes_wgs',
-    input:  expand('wgs/freebayes/{r}.vcf',r=grch38_regions),
-    output: 'wgs/freebayes/combined.vcf'
-    shell:
-        '''
-        grep '^#' {input[0]} > {output}
-        cat {input} | grep -v '^#' >> {output}
+        {CROSSMAP} \
+        vcf \
+        {input.chain} \
+        {input.vcf} \
+        {HG19} \
+        {output.vcf}
         '''
 
 rule run_freebayes_wgs:

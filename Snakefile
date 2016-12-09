@@ -58,6 +58,7 @@ rule plot_hapcut2_results:
     output:
         plot1 = "%s/sissor_haplotype_error_chromosome.png" % config['plots_dir'],
         plot2 = "%s/sissor_haplotype_error_genome.png" % config['plots_dir']
+
     run:
         data = pickle.load(open(input.stats_file,"rb"))
         labels = pickle.load(open(input.labels_file,"rb"))
@@ -196,6 +197,7 @@ rule fix_fragmat:
             fix_chamber_contamination(i,v,o,threshold=2, min_coverage=mincov,mode=mode)
 
 # COMBINE FRAGMENT MATRICES
+'''
 rule merge_fragmat:
     params:
         job_name  = "merge_fragmat",
@@ -225,6 +227,7 @@ rule create_augmented_fragmat:
     run:
         output_dir = os.path.join(data_dir,wildcards.s,'augmented_fragmat')
         create_hapcut_fragment_matrices_freebayes(input.ploidy1_vcfs, input.ploidy2_vcfs, input.beds, wildcards.s, chambers_pad, input.var_vcfs, output_dir, hets_in_seq=True)
+'''
 
 # simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
 rule simlinks:
@@ -260,60 +263,6 @@ rule simlinks:
             ln -s {config[PGP1_A1_ploidy2]}/PGP1_A1_ch{chpad}.freebayes.ploidy2.allpos.vcf {data_dir}/PGP1_A1/ploidy2/ch{ch}.vcf
             ln -s {config[PGP1_A1_beds]}/ch{ch}.bed {data_dir}/PGP1_A1/beds/ch{ch}.bed
             ''')
-
-
-
-# prepare a small 1 Mb region of chr4 from each chamber
-# will serve as a testing ground for base call correction code
-SAMPLE_CHROM = 'chr4'
-SAMPLE_START = int(4e7)
-SAMPLE_END   = int(5e7)
-
-short_chrom_names = set([str(x) for x in range(1,23)]+['X','Y'])
-chrom_names = set(['chr'+str(x) for x in range(1,23)]+['chrX','chrY'])
-
-def format_chrom(chrom_str):
-    if chrom_str in short_chrom_names:
-        chrom_str = 'chr' + chrom_str
-    assert(chrom_str in chrom_names)
-    return chrom_str
-
-rule make_subsample_chamber:
-    params:
-        job_name = 'subsample_{x}_{ch}'
-    input:
-        ploidy1 = 'sissor_project/data/{x}/ploidy1/ch{ch}.vcf'
-    output:
-        ploidy1 = 'sissor_project/test_data/{x}/ploidy1/ch{ch}.vcf'
-    run:
-        with open(input.ploidy1, 'r') as infile, open(output.ploidy1, 'w') as outfile:
-
-            for line in infile:
-                if len(line) < 3 or line[0] == '#':
-                    print(line,file=outfile,end='')
-                    continue
-
-                # read line elements
-                el    = line.strip().split()
-                if len(el) < 3:
-                    print(line,file=outfile,end='')
-                    continue
-
-                chrom = format_chrom(el[0])
-                pos   = int(el[1])-1
-
-                if chrom != SAMPLE_CHROM or pos < SAMPLE_START:
-                    continue
-                if chrom == SAMPLE_CHROM and pos > SAMPLE_END:
-                    break
-
-                print(line,file=outfile,end='')
-
-rule make_subsample:
-    params:
-        job_name = 'make_subsamples'
-    input:
-        expand('sissor_project/test_data/{x}/ploidy1/ch{ch}.vcf',x=cells,ch=chambers)
 
 rule clean:
     shell:
