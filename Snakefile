@@ -228,7 +228,6 @@ rule create_augmented_fragmat:
         output_dir = os.path.join(data_dir,wildcards.s,'augmented_fragmat')
         create_hapcut_fragment_matrices_freebayes(input.ploidy1_vcfs, input.ploidy2_vcfs, input.beds, wildcards.s, chambers_pad, input.var_vcfs, output_dir, hets_in_seq=True)
 '''
-
 # simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
 rule simlinks:
     input:
