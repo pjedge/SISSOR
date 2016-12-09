@@ -1,207 +1,334 @@
-from collections import defaultdict
+# author: Peter Edge
+# 3/29/2016
+# email: pedge@eng.ucsd.edu
+
+# this is a snakemake Snakefile, written using snakemake 3.5.5
+# configure paths and values in cluster.yaml and config.yaml to your system
+# example execution for a TORQUE cluster:
+# snakemake -j 200 --cluster-config cluster.yaml --cluster "qsub -A {cluster.group} -V -q {cluster.queue} -o {cluster.qsub_stdout_dir}/{params.job_name}.o -e {cluster.qsub_stdout_dir}/{params.job_name}.e -N {params.job_name} -l nodes=1:ppn={cluster.ppn} -l walltime={cluster.walltime} -M {cluster.email} -m e -d {cluster.working_dir}" --local-cores 1
+sys.path.append('/home/peter/git/HapTools')
+configfile: "config.yaml"
+localrules: all, plot_hapcut2_results, simlinks, clean
+
+import sys
+sys.path.append(config['haptools_dir'])
+import run_tools
+import error_rates
+import fileIO
+import plot_data
+import os
+from os.path import join
+from create_hapcut_fragment_matrix import create_hapcut_fragment_matrices_freebayes
+from fix_chamber_contamination import fix_chamber_contamination
 import pickle
-import random
-import estimate_parameters
-import fix_sam
-import chamber_allele_call_accuracy as caca
-import base_calls_to_vcf
+from collections import defaultdict
+from plot_sissor import plot_sissor
 
-localrules: all, simlinks
+# qsub stderr and stdout directories are not automatically created by snakemake!
+if not os.path.exists(config['qsub_stdout_dir']):
+    os.makedirs(config['qsub_stdout_dir'])
 
-chroms = ['chr{}'.format(i) for i in range(1,23)]
 
-# cutoff values are coded as 1.0-10**(-1*x)
-# so 3 => 0.999
-# and 5 => 0.99999
-cutoffs = list(range(1,11))
-#cutoffs = [5]
+# specify chambers
+data_dir = config["data_dir"]
+experiments_dir = config["experiments_dir"]
+plots_dir = config["plots_dir"]
+chambers = list(range(1,25))
+chambers_pad = ['{0:02d}'.format(c) for c in chambers]
+chroms  = ['chr{}'.format(i) for i in range(1,23)]
+samples = ['PGP1_ALL','PGP1_21','PGP1_22','PGP1_A1']
+cells=samples[1:]
+
+variant_vcf_dir = join(data_dir,'PGP1_VCFs')
+variant_vcf_dir_fp = join(data_dir,'PGP1_VCFs_w_false_positives')
 
 rule all:
     input:
-        expand('gms/{chr}.gms',chr=chroms)
-        #expand('accuracy_reports/cutoff{cut}.results',cut=cutoffs)
+        expand("{P}/sissor_haplotype_error_chromosome.png",P=config['plots_dir']),
+        expand("{P}/sissor_haplotype_error_genome.png",P=config['plots_dir']),
+        #expand("{d}/{s}/fixed_beds/ch{ch}.bed",d=data_dir,s=cells,ch=chambers)
 
-cells = ['PGP1_21','PGP1_22','PGP1_A1']
-chambers = list(range(1,25))
-chambers_pad = ['{0:02d}'.format(c) for c in chambers]
-grams_DNA_before_MDA  = 0.25e-12  # 0.25 pg
-grams_DNA_after_MDA = 6e-9        # 6 ng
-chunksize = int(5e6)
-
-SAMTOOLS = '/opt/biotools/samtools/1.3/bin/samtools'
-HG19     = '/oasis/tscc/scratch/pedge/data/genomes/hg19/hg19.fa' #'/home/wkchu/zhang_lab_oasis/resources_v2.8_b37/human_g1k_v37_decoy.fasta'
-CGI_SNPs1 = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/BAM/ns.gff'
-CGI_SNPs2 = '/oasis/tscc/scratch/pedge/sissor_project/data/PGP1_VCFs/all.vcf'
-PGP1_21_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/BAM'
-PGP1_22_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/previous/BAM'
-PGP1_A1_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/HiSeqCombinedBAM'
-
-hg19_size_list = [('chr1', 249250621),
- ('chr2', 243199373),
- ('chr3', 198022430),
- ('chr4', 191154276),
- ('chr5', 180915260),
- ('chr6', 171115067),
- ('chr7', 159138663),
- ('chr8', 146364022),
- ('chr9', 141213431),
- ('chr10', 135534747),
- ('chr11', 135006516),
- ('chr12', 133851895),
- ('chr13', 115169878),
- ('chr14', 107349540),
- ('chr15', 102531392),
- ('chr16', 90354753),
- ('chr17', 81195210),
- ('chr18', 78077248),
- ('chr19', 59128983),
- ('chr20', 63025520),
- ('chr21', 48129895),
- ('chr22', 51304566),
- ('chrX', 155270560),
- ('chrY', 59373566)]
-
-# create chunks of hg19
-# return list of (chrom,start,stop) tuples. stop is inclusive
-chunklist = []
-for chrom, chrlen in hg19_size_list:
-    for start in range(1,chrlen+1,chunksize):
-        end = start+chunksize-1 if start+chunksize-1 < chrlen else chrlen
-        chunklist.append((chrom,start,end))
-
-regions = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in chunklist]
-
-rule download_GMS:
-    params: job_name = 'download_GMS.{chr}'
-    output: 'gms/{chr}.gms',
-    shell:
-    '''
-        wget http://labshare.cshl.edu/shares/schatzlab/www-data/darkmatter/by_tech/hg19_illumina/{chr}.gms.gz -O {output}.gz
-        gunzip {output}.gz
-    '''
-
-
-rule het_vcf_file:
-    params: job_name = 'het_vcf_file.{cut}'
-    input:  ccf = 'output/chamber_allele_calls.out'
-    output: vcf = 'het_vcfs/cutoff{cut}.whole_genome.vcf',
+# PLOT RESULTS
+rule plot_hapcut2_results:
+    params:
+        job_name = "plot_hapcut2_sissor"
+    input:
+        stats_file  = "{}/hapcut2.stats.p".format(config['error_rates_dir']),
+        labels_file = "{}/hapcut2.labels.p".format(config['error_rates_dir'])
+    output:
+        plot1 = "%s/sissor_haplotype_error_chromosome.png" % config['plots_dir'],
+        plot2 = "%s/sissor_haplotype_error_genome.png" % config['plots_dir']
     run:
-        base_calls_to_vcf.base_calls_to_vcf(input.ccf,(1.0-10**(-1*int(wildcards.cut))),output.vcf)
+        data = pickle.load(open(input.stats_file,"rb"))
+        labels = pickle.load(open(input.labels_file,"rb"))
+        plot_data.plot_experiment_sissor(data[1:3],labels[1:3],[],output.plot1)
+        plot_sissor(data,labels,output.plot2)
 
-rule accuracy_aggregate:
-    params: job_name = 'accuracy_aggregate.{cut}'
-    input: counts = expand('accuracy_reports/split/{r}/{{cut}}/counts.p',r=regions),
-            mof = expand('accuracy_reports/split/{r}/{{cut}}/mismatches',r=regions),
-    output: report = 'accuracy_reports/cutoff{cut}.results',
-            mof = 'accuracy_reports/cutoff{cut}.mismatches'
+exp =['cov1_none','cov1_basic','cov1_strict','cov2_basic']
+exp_labels=['No processing','Basic Processing','Strict Processing','Basic Processing, coverage >= 2']
+rule calculate_error_rates:
+    params:
+        job_name = "hapcut2_error_rates"
+    input:
+        hapblocks = expand("{E}/hapcut2_PGP1_ALL/{exp}/{c}.output",E=experiments_dir,exp=exp,c=chroms),
+        runtimes  = expand("{E}/hapcut2_PGP1_ALL/{exp}/{c}.runtime",E=experiments_dir,exp=exp,c=chroms),
+        fragmats  = expand("{d}/PGP1_ALL/fragmat/{exp}/{c}",d=data_dir,exp=exp,c=chroms),
+        var_vcfs  = expand("{v}/{c}.vcf",v=variant_vcf_dir,c=chroms),
+        bac_haps  = expand("{bac}/{c}.filtered",bac=config['BAC_hapblocks'], c=chroms)
+    output:
+        stats_file  = "{}/hapcut2.stats.p".format(config['error_rates_dir']),
+        labels_file = "{}/hapcut2.labels.p".format(config['error_rates_dir'])
     run:
-        caca.accuracy_aggregate(input.counts,output.report)
-        shell('cat {input.mof} > {output.mof}')
+        # list of lists of error results,
+        data   = [] # index of the list is a 'condition' each inner list has 23 error results (each chrom).
+        labels = exp_labels
 
-rule accuracy_count:
-    params: job_name = 'accuracy_count'
-    input:  ccf = 'output/split/{r}.out',
-            gff = CGI_SNPs1,
-            vcf = CGI_SNPs2,
-    output: counts_lst = expand('accuracy_reports/split/{{r}}/{cut}/counts.p',cut=cutoffs),
-            mof_lst = expand('accuracy_reports/split/{{r}}/{cut}/mismatches',cut=cutoffs),
+        for x in exp: # sample
+            datalist = []
+            for c in chroms: # chromosome
+                assembly_file = "{}/hapcut2_PGP1_ALL/{}/{}.output".format(config['experiments_dir'],x,c)
+                runtime_file  = "{}/hapcut2_PGP1_ALL/{}/{}.runtime".format(config['experiments_dir'],x,c)
+                frag_file     = "{}/PGP1_ALL/fragmat/{}/{}".format(data_dir,x,c)
+                vcf_file      = "{}/{}.vcf".format(variant_vcf_dir,c)
+                truth_file    = "{}/{}.filtered".format(config['BAC_hapblocks'], c)
+                err = error_rates.hapblock_hapblock_error_rate(truth_file, assembly_file, frag_file, vcf_file, runtime_file)
+                datalist.append(err)
+
+            print("{} results over all chromosomes:".format(x))
+            print(sum(datalist,error_rates.error_result()))
+
+            data.append(datalist)
+
+        pickle.dump(data,open(output.stats_file,"wb"))
+        pickle.dump(labels,open(output.labels_file,"wb"))
+
+
+# RUN HAPCUT2
+rule prune_haplotype:
+    params:
+        job_name = "{s}.{x}.prune_haplotype",
+    input:
+        hapblocks = expand("{E}/hapcut2_{{s}}/{{x}}/{c}.output.uncorrected",E=experiments_dir,c=chroms)
+    output:
+        hapblocks = expand("{E}/hapcut2_{{s}}/{{x}}/{c}.output",E=experiments_dir,c=chroms)
     run:
-        for counts, mof, cut in zip(output.counts_lst, output.mof_lst, cutoffs):
-            caca.accuracy_count(input.ccf,input.gff,input.vcf,(1.0-10**(-1*int(cut))),counts,mof)
+        for i, o in zip(input.hapblocks,output.hapblocks):
+            fileIO.prune_hapblock_file(i, o, snp_conf_cutoff=0.95, split_conf_cutoff=0.49, use_refhap_heuristic=True) #split_conf_cutoff=0.9999
 
+# RUN HAPCUT2
+rule run_hapcut2:
+    params:
+        job_name = "{s}.{c}.{x}.hapcut",
+    input:
+        frag_file = "%s/{s}/fragmat/{x}/{c}" % data_dir,
+        vcf_file  = lambda wildcards: expand("{v}/{c}.vcf", v=variant_vcf_dir,c=wildcards.c)
+    output:
+        hapblocks = "{E}/hapcut2_{s}/{x}/{c}.output.uncorrected",
+        runtime = "{E}/hapcut2_{s}/{x}/{c}.runtime"
+    run:
+        # run hapcut
+        runtime = run_tools.run_hapcut2(config['hapcut2'], input.frag_file, input.vcf_file, output.hapblocks, 5, 0.8, '--ea 1')
+        with open(output.runtime,'w') as rf:
+            print(runtime, file=rf)
+
+# CREATE BED FILES FOR THE NEW FIXED FRAGMENTS
 '''
-rule combine_base_calls:
-    params: job_name = 'combine_base_calls'
-    input:  expand('output/split/{r}.out',r=regions)
-    output: 'output/chamber_allele_calls.out'
-    shell: 'cat {input} > {output}'
-
-rule call_alleles:
-    params: job_name = 'call_alleles.{r}'
-    input:  pileup = 'pileups/split/{r}.pileup',
-            boundary_files = expand('fragment_boundary_beds/{ce}/ch{ch}.bed',ch=chambers,ce=cells),
-            cov_frac_dist = 'parameters/cov_frac_dist.p',
-            p_null = 'parameters/p_null.p',
-            ch_priors = 'parameters/ch_priors.p',
-            hom_config_probs = 'parameters/hom_config_probs.p',
-            het_config_probs = 'parameters/het_config_probs.p',
-            genotype_priors = 'parameters/genotype_priors.p',
-            omega = 'parameters/omega.p'
-    output: 'output/split/{r}.out'
+rule make_fixed_beds:
+    params:
+        job_name  = "make_fixed_beds",
+    input:
+        expand("{d}/PGP1_ALL/fragmat/cov1_strict/{c}",d=data_dir,c=chroms)
+    output:
+        expand("{d}/{s}/fixed_beds/ch{ch}.bed",d=data_dir,s=cells,ch=chambers)
     run:
-        import sissorhands
-        sissorhands.call_chamber_alleles(input.pileup, output[0], input.boundary_files)
+        cell_boundaries = defaultdict(list) # key: (cell,chamber#,chrom)  value: (start, end)
 
-rule estimate_parameters:
-    params: job_name = 'estimate_parameters'
-    input:  expand('parameters/split/chrX_covs.{r}.p',r=regions),
-            expand('parameters/split/chamber_position_counts.{r}.p',r=regions),
-            expand('parameters/split/strand_coverage_counts.{r}.p',r=regions),
-            expand('parameters/split/total_sampled_cell_positions.{r}.p',r=regions),
-    output: 'parameters/chrX_covs.p',
-            'parameters/chamber_position_counts.p',
-            'parameters/strand_coverage_counts.p',
-            'parameters/total_sampled_cell_positions.p',
-            'parameters/cov_frac_dist.p',
-            'parameters/p_null.p',
-            'parameters/ch_priors.p',
-            'parameters/hom_config_probs.p',
-            'parameters/het_config_probs.p',
-            'parameters/genotype_priors.p',
-            'parameters/omega.p'
-    run:
-        estimate_parameters.estimate_parameters(regions,grams_DNA_before_MDA,grams_DNA_after_MDA)
+        for chrom in chroms:
+            infile = "{}/PGP1_ALL/fragmat/cov1_strict/{}".format(data_dir,chrom)
+            with open(infile,'r') as inf:
+                for line in inf:
+                    if len(line) < 3:
+                        continue
+                    el = line.strip().split()
+                    ID = el[1]
+                    el2 = ID.split(':')
+                    boundstr = el2[-1]
+                    (start, end) = [int(x) for x in boundstr.split('-')]
+                    cell = el2[2]
+                    chamber = el2[3]
+                    chambernum = int(chamber[2:])
+                    cell_boundaries[(cell,chambernum,chrom)].append((start, end))
 
-rule obtain_counts_parallel:
-    params: job_name = 'obtain_counts_parallel.{r}'
-    input:  pileup = 'pileups/split/{r}.pileup',
-            boundary_files = expand('fragment_boundary_beds/{ce}/ch{ch}.bed',ch=chambers,ce=cells)
-    output: 'parameters/split/chrX_covs.{r}.p',
-            'parameters/split/chamber_position_counts.{r}.p',
-            'parameters/split/strand_coverage_counts.{r}.p',
-            'parameters/split/total_sampled_cell_positions.{r}.p',
-    run:
-        estimate_parameters.obtain_counts_parallel(input.pileup, input.boundary_files, wildcards.r)
-
-rule pileup:
-    params: job_name = 'pileup.{r}',
-            chrom = lambda wildcards: wildcards.r.split('.')[0],
-            start = lambda wildcards: wildcards.r.split('.')[1],
-            stop  = lambda wildcards: wildcards.r.split('.')[2]
-    input:  bams = expand('bams/{ce}/ch{ch}.bam',ch=chambers,ce=cells),
-            bais = expand('bams/{ce}/ch{ch}.bam.bai',ch=chambers,ce=cells)
-    output: pileup = 'pileups/split/{r}.pileup'
-    shell:  '{SAMTOOLS} mpileup --region {params.chrom}:{params.start}-{params.stop} --adjust-MQ 50 --max-depth 100 --output-MQ --min-MQ 30 --min-BQ 20 --fasta-ref {HG19} --output {output.pileup} {input.bams}'
-
-rule index_bam:
-    params: job_name = 'index_bam{ce}.{ch}'
-    input:  bam = 'bams/{ce}/ch{ch}.bam'
-    output: bai = 'bams/{ce}/ch{ch}.bam.bai'
-    shell:  '{SAMTOOLS} index {input.bam} {output.bai}'
-
-# PGP1_22 and PGP1_A1 don't have chr before chromosome labels. necessary for pileup to include reference
-# credit to petervangalen and Pierre Lindenbaum for this rule's code: https://www.biostars.org/p/13462/
-
-rule fix_sam:
-    params: job_name = 'fix_sam.{ce}.{ch}'
-    input:  sam = 'bams/{ce}/old.ch{ch}.sam'
-    output: bam = 'bams/{ce}/ch{ch}.bam'
-    run:
-        fix_sam.fix_sam(input.sam,output.bam)
-
-rule bam2sam:
-    params: job_name = 'bam2sam.{ce}.{ce}'
-    input:  'bams/{ce}/old.ch{ce}.bam'
-    output: temp(rules.fix_sam.input)
-    shell: '{SAMTOOLS} view -h {input} > {output}'
+        for cell in cells:
+            for chamber in chambers:
+                outfile = '{}/{}/fixed_beds/ch{}.bed'.format(data_dir,cell,chamber)
+                with open(outfile,'w') as of:
+                    for chrom in chroms:
+                        cell_boundaries[(cell,chamber,chrom)].sort()
+                        for start, end in cell_boundaries[(cell,chamber,chrom)]:
+                            line = '{}\t{}\t{}\t{}\tchamber{}'.format(chrom, start, end, end-start, chamber)
+                            print(line,file=of)
 '''
+# COMBINE FRAGMENT MATRICES
+rule fix_fragmat:
+    params:
+        job_name  = "fix_fragmat.{x}",
+    input:
+        var_vcfs = expand("{v}/{CHR}.vcf",v=variant_vcf_dir,CHR=chroms),
+        P_ALL = expand("{dat}/PGP1_ALL/augmented_fragmat/{c}",dat=data_dir,c=chroms)
+    output:
+        fixed = expand("{{data_dir}}/PGP1_ALL/fragmat/{{x}}/{c}",c=chroms)
+    run:
+        mincov = 0
+        if 'cov2' in wildcards.x:
+            mincov = 2
+        elif 'cov3' in wildcards.x:
+            mincov = 3
+
+        if 'none' in wildcards.x:
+            mode = 'none'
+        elif 'basic' in wildcards.x:
+            mode = 'basic'
+        elif 'strict' in wildcards.x:
+            mode = 'strict'
+
+        for i,v,o in zip(input.P_ALL, input.var_vcfs, output.fixed):
+            fix_chamber_contamination(i,v,o,threshold=2, min_coverage=mincov,mode=mode)
+
+# COMBINE FRAGMENT MATRICES
+rule merge_fragmat:
+    params:
+        job_name  = "merge_fragmat",
+    input:
+        P21      = expand("{dat}/PGP1_21/augmented_fragmat/{c}",dat=data_dir,c=chroms),
+        P22      = expand("{dat}/PGP1_22/augmented_fragmat/{c}",dat=data_dir,c=chroms),
+        PA1      = expand("{dat}/PGP1_A1/augmented_fragmat/{c}",dat=data_dir,c=chroms),
+        var_vcfs = expand("{v}/{CHR}.vcf",v=variant_vcf_dir,CHR=chroms)
+    output:
+        P_ALL = expand("{dat}/PGP1_ALL/augmented_fragmat/{c}",dat=data_dir,c=chroms)
+    run:
+        for i1, i2, i3, o in zip(input.P21, input.P22, input.PA1, output.P_ALL):
+            shell('cat {i1} {i2} {i3} > {o}')
+
+# CREATE AUGMENTED FRAGMENT MATRIX FILES WITH HETEROZYGOUS CALL LOCATIONS
+# SAME FORMAT AS BEFORE, BUT NOW '2' represents a heterozygous call
+rule create_augmented_fragmat:
+    params:
+        job_name  = "{s}.create_augmented_fragmat",
+    input:
+        ploidy1_vcfs = expand("{{data_dir}}/{{s}}/ploidy1/ch{ch}.vcf",ch=chambers),
+        ploidy2_vcfs = expand("{{data_dir}}/{{s}}/ploidy2/ch{ch}.vcf",ch=chambers),
+        beds         = expand("{{data_dir}}/{{s}}/beds/ch{ch}.bed",ch=chambers),
+        var_vcfs     = expand("{v}/{CHR}.vcf",v=variant_vcf_dir,CHR=chroms)
+    output:
+        expand("{{data_dir}}/{{s}}/augmented_fragmat/{c}",c=chroms)
+    run:
+        output_dir = os.path.join(data_dir,wildcards.s,'augmented_fragmat')
+        create_hapcut_fragment_matrices_freebayes(input.ploidy1_vcfs, input.ploidy2_vcfs, input.beds, wildcards.s, chambers_pad, input.var_vcfs, output_dir, hets_in_seq=True)
+
 # simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
 rule simlinks:
+    input:
+        expand("{DIR}/PGP1_21_ch{chpad}.freebayes.remap.depth.new.vcf",DIR=config['PGP1_21_ploidy1'],chpad=chambers_pad),
+        expand("{DIR}/PGP1_21_ch{chpad}.ploidy2.freebayes.depth.vcf",DIR=config['PGP1_21_ploidy2'],chpad=chambers_pad),
+        expand("{DIR}/ch{ch}.bed",DIR=config['PGP1_21_beds'],ch=chambers),
+        expand("{DIR}/PGP1_22_ch{chpad}.freebayes.remap.depth.vcf",DIR=config['PGP1_22_ploidy1'],chpad=chambers_pad),
+        expand("{DIR}/PGP1_22_ch{chpad}.ploidy2.freebayes.vcf",DIR=config['PGP1_22_ploidy2'],chpad=chambers_pad),
+        expand("{DIR}/ch{ch}.bed",DIR=config['PGP1_22_beds'],ch=chambers),
+        expand("{DIR}/PGP1_A1_ch{chpad}.freebayes.allpos.vcf",DIR=config['PGP1_A1_ploidy1'],chpad=chambers_pad),
+        expand("{DIR}/PGP1_A1_ch{chpad}.freebayes.ploidy2.allpos.vcf",DIR=config['PGP1_A1_ploidy2'],chpad=chambers_pad),
+        expand("{DIR}/ch{ch}.bed",DIR=config['PGP1_A1_beds'],ch=chambers),
     run:
         for ch,chpad in zip(chambers,chambers_pad):
             shell('''
-            mkdir -p bams/PGP1_21 bams/PGP1_22 bams/PGP1_A1
-            ln -s {PGP1_21_dir}/PGP1_21_ch{chpad}.sorted.chr.bam bams/PGP1_21/ch{ch}.bam
-            ln -s {PGP1_22_dir}/PGP1_22_ch{chpad}.sorted.bam bams/PGP1_22/old.ch{ch}.bam
-            ln -s {PGP1_A1_dir}/PGP1_A1_ch{chpad}.sorted.bam bams/PGP1_A1/old.ch{ch}.bam
+            mkdir -p {data_dir}/PGP1_21/ploidy1
+            mkdir -p {data_dir}/PGP1_21/ploidy2
+            mkdir -p {data_dir}/PGP1_21/beds
+            ln -s {config[PGP1_21_ploidy1]}/PGP1_21_ch{chpad}.freebayes.remap.depth.new.vcf {data_dir}/PGP1_21/ploidy1/ch{ch}.vcf
+            ln -s {config[PGP1_21_ploidy2]}/PGP1_21_ch{chpad}.ploidy2.freebayes.depth.vcf {data_dir}/PGP1_21/ploidy2/ch{ch}.vcf
+            ln -s {config[PGP1_21_beds]}/ch{ch}.bed {data_dir}/PGP1_21/beds/ch{ch}.bed
+            mkdir -p {data_dir}/PGP1_22/ploidy1
+            mkdir -p {data_dir}/PGP1_22/ploidy2
+            mkdir -p {data_dir}/PGP1_22/beds
+            ln -s {config[PGP1_22_ploidy1]}/PGP1_22_ch{chpad}.freebayes.remap.depth.new.vcf {data_dir}/PGP1_22/ploidy1/ch{ch}.vcf
+            ln -s {config[PGP1_22_ploidy2]}/PGP1_22_ch{chpad}.ploidy2.freebayes.vcf {data_dir}/PGP1_22/ploidy2/ch{ch}.vcf
+            ln -s {config[PGP1_22_beds]}/ch{ch}.bed {data_dir}/PGP1_22/beds/ch{ch}.bed
+            mkdir -p {data_dir}/PGP1_A1/ploidy1
+            mkdir -p {data_dir}/PGP1_A1/ploidy2
+            mkdir -p {data_dir}/PGP1_A1/beds
+            ln -s {config[PGP1_A1_ploidy1]}/PGP1_A1_ch{chpad}.freebayes.allpos.vcf {data_dir}/PGP1_A1/ploidy1/ch{ch}.vcf
+            ln -s {config[PGP1_A1_ploidy2]}/PGP1_A1_ch{chpad}.freebayes.ploidy2.allpos.vcf {data_dir}/PGP1_A1/ploidy2/ch{ch}.vcf
+            ln -s {config[PGP1_A1_beds]}/ch{ch}.bed {data_dir}/PGP1_A1/beds/ch{ch}.bed
             ''')
+
+
+
+# prepare a small 1 Mb region of chr4 from each chamber
+# will serve as a testing ground for base call correction code
+SAMPLE_CHROM = 'chr4'
+SAMPLE_START = int(4e7)
+SAMPLE_END   = int(5e7)
+
+short_chrom_names = set([str(x) for x in range(1,23)]+['X','Y'])
+chrom_names = set(['chr'+str(x) for x in range(1,23)]+['chrX','chrY'])
+
+def format_chrom(chrom_str):
+    if chrom_str in short_chrom_names:
+        chrom_str = 'chr' + chrom_str
+    assert(chrom_str in chrom_names)
+    return chrom_str
+
+rule make_subsample_chamber:
+    params:
+        job_name = 'subsample_{x}_{ch}'
+    input:
+        ploidy1 = 'sissor_project/data/{x}/ploidy1/ch{ch}.vcf'
+    output:
+        ploidy1 = 'sissor_project/test_data/{x}/ploidy1/ch{ch}.vcf'
+    run:
+        with open(input.ploidy1, 'r') as infile, open(output.ploidy1, 'w') as outfile:
+
+            for line in infile:
+                if len(line) < 3 or line[0] == '#':
+                    print(line,file=outfile,end='')
+                    continue
+
+                # read line elements
+                el    = line.strip().split()
+                if len(el) < 3:
+                    print(line,file=outfile,end='')
+                    continue
+
+                chrom = format_chrom(el[0])
+                pos   = int(el[1])-1
+
+                if chrom != SAMPLE_CHROM or pos < SAMPLE_START:
+                    continue
+                if chrom == SAMPLE_CHROM and pos > SAMPLE_END:
+                    break
+
+                print(line,file=outfile,end='')
+
+rule make_subsample:
+    params:
+        job_name = 'make_subsamples'
+    input:
+        expand('sissor_project/test_data/{x}/ploidy1/ch{ch}.vcf',x=cells,ch=chambers)
+
+rule clean:
+    shell:
+        '''
+        rm -rf sissor_project/plots/bak sissor_project/error_rates/bak sissor_project/experiments/bak sissor_project/data/bak || true 2>/dev/null
+        mkdir -p sissor_project/plots/bak sissor_project/error_rates/bak sissor_project/experiments/bak sissor_project/data/bak || true 2>/dev/null
+        mv sissor_project/plots/*.png sissor_project/plots/bak || true 2>/dev/null
+        mv sissor_project/error_rates/*.p sissor_project/error_rates/bak || true 2>/dev/null
+        mv sissor_project/experiments/hapcut2* sissor_project/experiments/bak || true 2>/dev/null
+        mv sissor_project/data/PGP1_21 sissor_project/data/bak || true 2>/dev/null
+        mv sissor_project/data/PGP1_22 sissor_project/data/bak || true 2>/dev/null
+        mv sissor_project/data/PGP1_A1 sissor_project/data/bak || true 2>/dev/null
+        mv sissor_project/data/PGP1_ALL sissor_project/data/bak || true 2>/dev/null
+        '''
+
+rule dummy:
+    run:
+        pass
