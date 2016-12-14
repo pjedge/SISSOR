@@ -281,7 +281,7 @@ rule combine_base_calls:
 rule call_alleles:
     params: job_name = 'call_alleles.{r}'
     input:  pileup = 'pileups/split/{r}.pileup',
-            boundary_files = expand('fragment_boundary_beds/{ce}/ch{ch}.bed',ch=chambers,ce=cells),
+            boundary_files = expand('fragment_boundary_beds/{ce}/ch{ch}.bed',ce=cells,ch=chambers),
             cov_frac_dist = 'parameters/cov_frac_dist.p',
             p_null = 'parameters/p_null.p',
             ch_priors = 'parameters/ch_priors.p',
