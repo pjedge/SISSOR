@@ -281,7 +281,7 @@ rule combine_base_calls:
 rule call_alleles:
     params: job_name = 'call_alleles.{r}'
     input:  pileup = 'pileups/split/{r}.pileup',
-            boundary_files = expand('fragment_boundary_beds/{ce}/ch{ch}.bed',ch=chambers,ce=cells),
+            boundary_files = expand('fragment_boundary_beds/{ce}/ch{ch}.bed',ce=cells,ch=chambers),
             cov_frac_dist = 'parameters/cov_frac_dist.p',
             p_null = 'parameters/p_null.p',
             ch_priors = 'parameters/ch_priors.p',
@@ -317,7 +317,7 @@ rule estimate_parameters:
 rule obtain_counts_parallel:
     params: job_name = 'obtain_counts_parallel.{r}'
     input:  pileup = 'pileups/split/{r}.pileup',
-            boundary_files = expand('fragment_boundary_beds/{ce}/ch{ch}.bed',ch=chambers,ce=cells)
+            boundary_files = expand('fragment_boundary_beds/{ce}/ch{ch}.bed',ce=cells,ch=chambers)
     output: 'parameters/split/chrX_covs.{r}.p',
             'parameters/split/chamber_position_counts.{r}.p',
             'parameters/split/strand_coverage_counts.{r}.p',
@@ -330,8 +330,8 @@ rule pileup:
             chrom = lambda wildcards: wildcards.r.split('.')[0],
             start = lambda wildcards: wildcards.r.split('.')[1],
             stop  = lambda wildcards: wildcards.r.split('.')[2]
-    input:  bams = expand('bams/{ce}/ch{ch}.bam',ch=chambers,ce=cells),
-            bais = expand('bams/{ce}/ch{ch}.bam.bai',ch=chambers,ce=cells)
+    input:  bams = expand('bams/{ce}/ch{ch}.bam',ce=cells,ch=chambers),
+            bais = expand('bams/{ce}/ch{ch}.bam.bai',ce=cells,ch=chambers)
     output: pileup = 'pileups/split/{r}.pileup'
     shell:  '{SAMTOOLS} mpileup --region {params.chrom}:{params.start}-{params.stop} --adjust-MQ 50 --max-depth 100 --output-MQ --min-MQ 30 --min-BQ 20 --fasta-ref {HG19} --output {output.pileup} {input.bams}'
 
