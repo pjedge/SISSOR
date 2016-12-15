@@ -16,33 +16,6 @@ het_vcf_cutoffs = list(range(1,6))
 chroms = ['chr{}'.format(i) for i in range(1,23)]
 chunksize = int(5e6)
 
-grch38_size_list = [('chr1', 248956422),
- ('chr2', 242193529),
- ('chr3', 198295559),
- ('chr4', 190214555),
- ('chr5', 181538259),
- ('chr6', 170805979),
- ('chr7', 159345973),
- ('chr8', 145138636),
- ('chr9', 138394717),
- ('chr10', 133797422),
- ('chr11', 135086622),
- ('chr12', 133275309),
- ('chr13', 114364328),
- ('chr14', 107043718),
- ('chr15', 101991189),
- ('chr16', 90338345),
- ('chr17', 83257441),
- ('chr18', 80373285),
- ('chr19', 58617616),
- ('chr20', 64444167),
- ('chr21', 46709983),
- ('chr22', 50818468)]
- #
- #('chrX', 156040895),
- #('chrY', 57227415)]
-
-
 hg19_size_list = [('chr1', 249250621),
  ('chr2', 243199373),
  ('chr3', 198022430),
@@ -79,21 +52,13 @@ for chrom, chrlen in hg19_size_list:
         chunklist.append((chrom,start,end))
 
 regions = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in chunklist]
-# create chunks of hg19
-# return list of (chrom,start,stop) tuples. stop is inclusive
-grch38_chunklist = []
-for chrom, chrlen in grch38_size_list:
-    for start in range(1,chrlen+1,chunksize):
-        end = start+chunksize-1 if start+chunksize-1 < chrlen else chrlen
-        grch38_chunklist.append((chrom,start,end))
 
-grch38_regions = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in grch38_chunklist]
 
 rule all:
     input:
-        expand('het_vcfs/cutoff{cut}/whole_genome.vcf',cut=het_vcf_cutoffs)
+        #expand('het_vcfs/cutoff{cut}/whole_genome.vcf',cut=het_vcf_cutoffs)
         #'accuracy_reports/new/split/chr2.145000001.150000000/7/mismatches'
-        #expand('accuracy_reports/new/cutoff{cut}.results',cut=cutoffs)
+        expand('accuracy_reports/new/cutoff{cut}.results',cut=cutoffs)
 
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
@@ -104,16 +69,13 @@ grams_DNA_after_MDA = 6e-9        # 6 ng
 SAMTOOLS = '/opt/biotools/samtools/1.3/bin/samtools'
 PICARD   = '/home/pedge/installed/picard.jar'
 CROSSMAP = '/home/pedge/installed/opt/python/bin/CrossMap.py'
+WGS_VCF_URL = 'https://www.encodeproject.org/files/ENCFF995BBX/@@download/ENCFF995BBX.vcf.gz'
 HG19     = '/oasis/tscc/scratch/pedge/data/genomes/hg19/hg19.fa' #'/home/wkchu/zhang_lab_oasis/resources_v2.8_b37/human_g1k_v37_decoy.fasta'
-GRCH38   = '/oasis/tscc/scratch/pedge/data/genomes/grch38/grch38.fa'
-GRCH38_URL = 'https://www.encodeproject.org/files/GRCh38_no_alt_analysis_set_GCA_000001405.15/@@download/GRCh38_no_alt_analysis_set_GCA_000001405.15.fasta.gz'
 CGI_SNPs1 = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/BAM/ns.gff'
 CGI_SNPs2 = '/oasis/tscc/scratch/pedge/sissor_project/data/PGP1_VCFs/all.vcf'
-WGS_VCF_URL = 'https://www.encodeproject.org/files/ENCFF995BBX/@@download/ENCFF995BBX.vcf.gz'
-WGS_BAM_URL = 'https://www.encodeproject.org/files/ENCFF713HUF/@@download/ENCFF713HUF.bam'
 PGP1_21_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/BAM'
-PGP1_22_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/previous/BAM'
-PGP1_A1_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/HiSeqCombinedBAM'
+PGP1_22_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/2016OctMergedBAM'#'/oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/previous/BAM'
+PGP1_A1_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/2016OctMergedBAM'#'/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/HiSeqCombinedBAM'
 
 rule het_vcf_file:
     params: job_name = 'het_vcf_file.{cut}'
@@ -137,11 +99,10 @@ rule accuracy_count:
     params: job_name = 'accuracy_count.{chrom}.{start}.{end}'
     input:  ccf = 'output/split/{chrom}.{start}.{end}.out',
             gff = CGI_SNPs1,
-            wgs = 'wgs/freebayes_hg19/{chrom}.done',
             cgi_vcf  = CGI_SNPs2,
             gms = 'gms/{chrom}.{start}.{end}.gms',
-            hg19 = HG19
-            #wgs_vcf = 'wgs/freebayes_hg19/{r}.vcf',
+            hg19 = HG19,
+            wgs_vcf = 'wgs/wgs_hg19.vcf'
     output: counts_lst = temp(expand('accuracy_reports/new/split/{{chrom}}.{{start}}.{{end}}/{cut}/counts.p',cut=cutoffs)),
             mof_lst = temp(expand('accuracy_reports/new/split/{{chrom}}.{{start}}.{{end}}/{cut}/mismatches',cut=cutoffs)),
     run:
@@ -149,9 +110,8 @@ rule accuracy_count:
         reg_start = int(wildcards.start)
         reg_end   = int(wildcards.end)
         region = (reg_chrom, reg_start, reg_end)
-        wgs_vcf = 'wgs/freebayes_hg19/{0}.{1}.{2}.vcf'.format(*region)
         for counts, mof, cut in zip(output.counts_lst, output.mof_lst, cutoffs):
-            caca.accuracy_count(input.ccf, input.gff, wgs_vcf, input.cgi_vcf, input.gms, input.hg19, region, (1.0-10**(-1*int(cut))), counts, mof)
+            caca.accuracy_count(input.ccf, input.gff, input.wgs_vcf, input.cgi_vcf, input.gms, input.hg19, region, (1.0-10**(-1*int(cut))), counts, mof)
 
 rule liftover_wgs_SNPs:
     params: job_name  = 'liftover_SNPs',
@@ -167,6 +127,15 @@ rule liftover_wgs_SNPs:
         {input.vcf} \
         {input.hg19} \
         {output.vcf}
+        '''
+
+rule download_WGS_vcf:
+    params: job_name = 'download_WGS_vcf'
+    output: vcf = 'wgs/wgs_grch38.vcf'
+    shell:
+        '''
+        wget {WGS_VCF_URL} -O {output.vcf}.gz
+        mv {output.vcf}.gz {output.vcf}
         '''
 
 rule split_gms:
@@ -185,93 +154,6 @@ rule download_GMS:
         gunzip {output}.gz
         '''
 
-rule split_freebayes_wgs:
-    params: job_name  = 'split_freebayes_wgs_{c}',
-    input:  vcf  = 'wgs/lifted_sorted/{c}.vcf'
-    output: done  = touch('wgs/freebayes_hg19/{c}.done')
-    run:
-        outfiles   = ['wgs/freebayes_hg19/{}.{}.{}.vcf'.format(chrom,start,end) for (chrom,start,end) in chunklist if chrom == wildcards.c]
-        chr_chunks = [(chrom,start,end) for (chrom,start,end) in chunklist if chrom == wildcards.c]
-        caca.split_vcf(input.vcf, chr_chunks, outfiles)
-
-rule sort_freebayes_wgs:
-    params: job_name  = 'sort_freebayes_wgs.{c}',
-    input:  expand('wgs/lifted/{r}.vcf',r=grch38_regions),
-    output: 'wgs/lifted_sorted/{c}.vcf'
-    run:
-        infiles =  [f for (chrom,start,end),f in zip(grch38_chunklist,input) if chrom == wildcards.c]
-        shell('''
-        grep '^#' {infiles[0]} > {output}
-        cat {infiles} |
-        grep -v '^#' |
-        vcf-sort -c -p 4 >> {output}
-        ''')
-
-rule liftover_wgs:
-    params: job_name  = 'liftover.{r}',
-    input:  vcf = 'wgs/freebayes/{r}.vcf',
-            chain = 'hg38ToHg19.over.chain'
-    output: vcf = 'wgs/lifted/{r}.vcf',
-    shell:
-        '''
-        {CROSSMAP} \
-        vcf \
-        {input.chain} \
-        {input.vcf} \
-        {HG19} \
-        {output.vcf}
-        '''
-
-rule run_freebayes_wgs:
-    params:
-        job_name  = 'freebayes.{chr}.{start}.{stop}',
-    input:  bam   = 'wgs/wgs.bam',
-            bai   = 'wgs/wgs.bam.bai',
-            ref   = GRCH38
-    output: region_vcf = 'wgs/freebayes/{chr}.{start}.{stop}.vcf'
-    shell:
-        '''
-        freebayes -f {GRCH38} \
-        --standard-filters \
-        --report-monomorphic \
-        --region {wildcards.chr}:{wildcards.start}..{wildcards.stop} \
-         {input.bam} > {output.region_vcf}
-        '''
-        #--genotype-qualities \
-
-rule index_bam:
-    params: job_name = 'index_bam.{x}'
-    input:  bam = '{x}.bam'
-    output: bai = '{x}.bam.bai'
-    shell:  '''{SAMTOOLS} index {input.bam} {output.bai}'''
-
-rule download_grch38:
-    params: job_name = 'download_grch38'
-    output: fa = GRCH38
-    shell:
-        '''
-        wget {GRCH38_URL} -O {output.fa}.gz
-        gunzip {output.fa}.gz
-        '''
-
-rule download_WGS_bam:
-    params: job_name = 'download_WGS_bam'
-    output: bam = 'wgs/wgs.bam'
-    shell:
-        '''
-        wget {WGS_BAM_URL} -O {output.bam}
-        '''
-
-rule download_WGS_vcf:
-    params: job_name = 'download_WGS_vcf'
-    output: vcf = 'wgs/wgs_grch38.vcf'
-    shell:
-        '''
-        wget {WGS_VCF_URL} -O {output.vcf}.gz
-        mv {output.vcf}.gz {output.vcf}
-        '''
-
-'''
 rule combine_base_calls:
     params: job_name = 'combine_base_calls'
     input:  expand('output/split/{r}.out',r=regions)
@@ -281,7 +163,7 @@ rule combine_base_calls:
 rule call_alleles:
     params: job_name = 'call_alleles.{r}'
     input:  pileup = 'pileups/split/{r}.pileup',
-            boundary_files = expand('fragment_boundary_beds/{ce}/ch{ch}.bed',ch=chambers,ce=cells),
+            #boundary_files = expand('fragment_boundary_beds/{ce}/ch{ch}.bed',ce=cells,ch=chambers),
             cov_frac_dist = 'parameters/cov_frac_dist.p',
             p_null = 'parameters/p_null.p',
             ch_priors = 'parameters/ch_priors.p',
@@ -292,7 +174,7 @@ rule call_alleles:
     output: 'output/split/{r}.out'
     run:
         import sissorhands
-        sissorhands.call_chamber_alleles(input.pileup, output[0], input.boundary_files)
+        sissorhands.call_chamber_alleles(input.pileup, output[0])
 
 rule estimate_parameters:
     params: job_name = 'estimate_parameters'
@@ -317,21 +199,21 @@ rule estimate_parameters:
 rule obtain_counts_parallel:
     params: job_name = 'obtain_counts_parallel.{r}'
     input:  pileup = 'pileups/split/{r}.pileup',
-            boundary_files = expand('fragment_boundary_beds/{ce}/ch{ch}.bed',ch=chambers,ce=cells)
+            #boundary_files = expand('fragment_boundary_beds/{ce}/ch{ch}.bed',ce=cells,ch=chambers)
     output: 'parameters/split/chrX_covs.{r}.p',
             'parameters/split/chamber_position_counts.{r}.p',
             'parameters/split/strand_coverage_counts.{r}.p',
             'parameters/split/total_sampled_cell_positions.{r}.p',
     run:
-        estimate_parameters.obtain_counts_parallel(input.pileup, input.boundary_files, wildcards.r)
+        estimate_parameters.obtain_counts_parallel(input.pileup, input.boundary_files=None, wildcards.r)
 
 rule pileup:
     params: job_name = 'pileup.{r}',
             chrom = lambda wildcards: wildcards.r.split('.')[0],
             start = lambda wildcards: wildcards.r.split('.')[1],
             stop  = lambda wildcards: wildcards.r.split('.')[2]
-    input:  bams = expand('bams/{ce}/ch{ch}.bam',ch=chambers,ce=cells),
-            bais = expand('bams/{ce}/ch{ch}.bam.bai',ch=chambers,ce=cells)
+    input:  bams = expand('bams/{ce}/ch{ch}.bam',ce=cells,ch=chambers),
+            bais = expand('bams/{ce}/ch{ch}.bam.bai',ce=cells,ch=chambers)
     output: pileup = 'pileups/split/{r}.pileup'
     shell:  '{SAMTOOLS} mpileup --region {params.chrom}:{params.start}-{params.stop} --adjust-MQ 50 --max-depth 100 --output-MQ --min-MQ 30 --min-BQ 20 --fasta-ref {HG19} --output {output.pileup} {input.bams}'
 
@@ -356,7 +238,7 @@ rule bam2sam:
     input:  'bams/{ce}/old.ch{ce}.bam'
     output: temp(rules.fix_sam.input)
     shell: '{SAMTOOLS} view -h {input} > {output}'
-'''
+
 # simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
 rule simlinks:
     run:

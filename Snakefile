@@ -237,9 +237,9 @@ rule fix_fragmat:
 
 rule generate_fragmatrix:
     params: job_name = 'generate_fragmatrix'
-    input:  ccf      = 'sissor_project/data/PGP1_ALL.het.whole_genome.ccf',
-            vcf      = 'sissor_project/data/PGP1_ALL.het.whole_genome.vcf',
-            bounds   = expand('base_calling/fragment_boundary_beds/{ce}/ch{ch}.bed',ch=chambers,ce=cells),
+    input:  ccf      = 'base_calling/het_vcfs/cutoff3/whole_genome.out',
+            vcf      = 'base_calling/het_vcfs/cutoff3/whole_genome.vcf',
+            bounds   = expand('base_calling/fragment_boundary_beds/{ce}/ch{ch}.bed',ce=cells,ch=chambers),
     output: fragmat  = expand('sissor_project/data/PGP1_ALL/augmented_fragmat/{c}',c=chroms),
             vcfs     = expand('sissor_project/data/PGP1_VCFs/{c}.vcf',c=chroms)
     run:
