@@ -18,8 +18,6 @@ def addlogs(a,b):
     else:
         return b + log10(1 + pow(10, a - b))
 
-
-from collections import defaultdict
 desc = 'Use cross-chamber information to call chamber alleles in SISSOR data'
 
 ###############################################################################
@@ -101,7 +99,7 @@ MDA_COR = log10(1 - MDA_ERR)
 MDA_ERR = log10(MDA_ERR) - log10(3) # the log probability of an MDA error, divided by 3
 
 INTRACELL_HAP_PENALTY = log10(1e-10) # intra-cell penalty for assigning chambers of different haps to same haps
-INTERCELL_HAP_PENALTY = log10(1e-5) # inter-cell penalty for assigning chambers of different haps to same haps
+INTERCELL_HAP_PENALTY = log10(1e-10) # inter-cell penalty for assigning chambers of different haps to same haps
 
 # INPUT
 # G: a tuple that specifies genotype e.g. ('A','T')
@@ -343,10 +341,10 @@ def precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers, fast_mode)
 # qual_data: list length 24, containing 1 list per chamber. inner list has q values (p(base call error)) callin in chamber.
 # configs:   list of configurations and their probabilities, see earlier
 
-def pr_genotype(pr_one_ch, nonzero_chambers, ref_allele, condensed_genotype_set):
+def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, condensed_genotype_set):
 
     probs = dict()
-    outline_el = ['*'] + ['*'] * (n_cells * n_chambers)
+    outline_el = ['*','*'] + sum([(['CELL{}'.format(i)]+['*'] * n_chambers) for i in range(1,n_cells+1)],[])
 
     hom_het_configs = [multicell_config(False,nonzero_chambers),multicell_config(True,nonzero_chambers)]
     p_assignment = defaultdict(lambda: tinylog)
@@ -355,6 +353,7 @@ def pr_genotype(pr_one_ch, nonzero_chambers, ref_allele, condensed_genotype_set)
     for G in genotype_set:
 
         configs = hom_het_configs[0] if G[0] == G[1] else hom_het_configs[1]
+        #configs = hom_het_configs[1]
         p_total = tinylog
 
         for config in configs:
@@ -438,80 +437,58 @@ def pr_genotype(pr_one_ch, nonzero_chambers, ref_allele, condensed_genotype_set)
 
 
             ########### NEW, 10/13/2016 #######################################
-            # IF WE KNOW TWO CHAMBERS c_a, c_b BELONG TO SAME HAPLOTYPE
-            # incur a penalty for assigning those to non-complementary strands
-            # IF WE KNOW TWO CHAMBERS c_a, c_b BELONG TO DIFFERENT HAPLOTYPE
-            # incur a penalty for assigning those to complementary strands
-            
-            # this penalty should be large within-cell and slightly smaller between cell.
-            # also, a chamber should get a special tag denoting its status:
-            # SAME CELL SAME HAP
-            # SAME CELL DIFFERENT HAP
-            # DIFFERENT CELL SAME HAP
-            # DIFFERENT CELL DIFFERENT HAP
-            same_haplotype = defaultdict(lambda: None) ## need to build this
-            same_haplotype[(0,1),(0,2)] = True
-            same_haplotype[(0,2),(0,1)] = True
-            done = set()
-            
-            # TODO: strand-matched chambers with the same data get different posteriors, figure out why            
-            
-            # ADDRESS THIS ISSUE, bundled/multicounted configurations
-            
-            #if c1 < c2 and c3 < c4:
-            #    perm = log10(4)
-            #elif (c1 < c2 and c3 == c4) or (c1 == c2 and c3 < c4):
-            #    perm = log10(2)
-            #elif c1 == c2 and c3 == c4:
-            #    perm = log10(1)    
-            
-            
-            for CELL1 in range(0,n_cells):
-                cell1_chambers, p_cell1_cfg = config[CELL1]
-                
-                for CELL2 in range(0,n_cells):
-                    cell2_chambers, p_cell2_cfg = config[CELL2]
 
-                    for x1,y1 in enumerate(cell1_chambers):
-                        for x2, y2 in enumerate(cell2_chambers):
+            '''
+            known_same_hap = {}#{((0,1),(0,2))}
+            known_diff_hap = {}#{((0,1),(1,0)),((0,2),(1,0))}
+
+            config_same_hap = set()
+            config_diff_hap = set()
+                        
+            for cell_a in range(0,n_cells):
+                cell_a_chambers, p_cell_a_cfg = config[cell_a]
+                
+                for cell_b in range(0,n_cells):
+                    cell_b_chambers, p_cell_a_cfg = config[cell_a]
+                    
+                    for y1,x1 in enumerate(cell_a_chambers):
+                        for y2,x2 in enumerate(cell_b_chambers):
                             
                             if x1 == n_chambers or x2 == n_chambers: # assignments to null chamber (not sampled)
                                 continue
+                                                        
+                            if cell_a == cell_b and y1 == y2:
+                                continue 
                             
-                            if ((CELL1,x1),(CELL2,x2)) in done or ((CELL2,x2),(CELL1,x1)) in done:
-                                continue
-                            
-                            if CELL1 == CELL2 and y1 == y2:
-                                continue
-
-                            if same_haplotype[(CELL1,x1),(CELL2,x2)] == None:
-                                continue # no haplotype information between these chambers   
-                            
-                            if ((same_haplotype[(CELL1,x1),(CELL2,x2)]
-                             and not ((y1 < 2 and y2 < 2) or (y1 >= 2 and y2 >= 2)))
-                             or ((not same_haplotype[(CELL1,x1),(CELL2,x2)])
-                                and ((y1 < 2 and y2 < 2) or (y1 >= 2 and y2 >= 2)))):   # 0,1 -> parent1 , 2,3 -> parent2
-                                
-                                # same haplotype but this configuration assigns them to different haplotypes
-                                # or diff haplotype but this configuration assigns them to same haplotypes
-
-                                if CELL1 == CELL2:
-                                    p += INTRACELL_HAP_PENALTY
-                                else: 
-                                    p += INTERCELL_HAP_PENALTY
-                                    
-                            done.add(((CELL1,x1),(CELL2,x2)))
-                
+                            if (y1 < 2 and y2 < 2) or (y1 >= 2 and y2 >= 2):
+                                config_same_hap.add(((cell_a,x1),(cell_b,x2))) # says "configuration places these cells/chambers in the same haplotype"
+                            else:
+                                config_diff_hap.add(((cell_a,x1),(cell_b,x2)))# says "configuration places these cells/chambers in different haplotype"
+                          
+            
+            for pair in known_same_hap:
+                if pair in config_diff_hap: #not in config_same_hap:
+                    if pair[0][0] == pair[1][0]: # same cell                    
+                        p += -1000#INTRACELL_HAP_PENALTY
+                    else: # different cell
+                        p += -1000#INTERCELL_HAP_PENALTY
+                          
+            for pair in known_diff_hap:
+                if pair not in config_diff_hap:
+                    if pair[0][0] == pair[1][0]: # same cell                   
+                        p += -1000#INTRACELL_HAP_PENALTY
+                    else: # different cell
+                        p += -1000#INTERCELL_HAP_PENALTY
+            
+            #print(config_same_hap)
+            #print(config_diff_hap)
+            '''
             ###################################################################
 
-
             p_total = addlogs(p_total, p) # update genotype likelihood sum
-
+            
             for assignment in assignments:
                 p_assignment[assignment] = addlogs(p_assignment[assignment], p + genotype_priors[ref_allele][G])
-
-        #if p_total == tinylog:
-        #    set_trace()
 
         probs[G] = p_total + genotype_priors[ref_allele][G]
 
@@ -519,13 +496,17 @@ def pr_genotype(pr_one_ch, nonzero_chambers, ref_allele, condensed_genotype_set)
     total = tinylog
     for G,p in probs.items():
         total = addlogs(total,p)
-
+        
     res = []
     SNP = False
     max_posterior = -1
     max_G = ('N','N')
+    allele_count = defaultdict(lambda: tinylog)
     for G in genotypes:
         if G in probs:
+            for allele in bases:
+                if allele in G:
+                    allele_count[allele] = addlogs(allele_count[allele],probs[G])
             posterior = 10**(probs[G] - total)
             res.append((G,posterior))
             if posterior > max_posterior:
@@ -536,9 +517,15 @@ def pr_genotype(pr_one_ch, nonzero_chambers, ref_allele, condensed_genotype_set)
 
     if max_G != (ref_allele,ref_allele):
         SNP = True
+    
+    res2 = [(allele,10**(allele_count[allele] - total)) for allele in bases]
 
-    out_str = ';'.join(['{}:{}'.format(''.join(g),p) for g,p in res])
-    outline_el[0] = out_str
+    allele_str = ';'.join(['{}:{}'.format(a,p) for a,p in res2])
+    gen_str = ';'.join(['{}:{}'.format(''.join(g),p) for g,p in res])
+    outline_el[0] = allele_str
+    outline_el[1] = gen_str
+    
+    
 
     for cell in range(0,n_cells):  # for each cell
         for chamber in nonzero_chambers[cell]:
@@ -571,15 +558,10 @@ def pr_genotype(pr_one_ch, nonzero_chambers, ref_allele, condensed_genotype_set)
 
             out_str = ';'.join(['{}:{}'.format(''.join(a),p) for a,p in res])
 
-            outline_el[1 + cell*n_chambers + chamber] = out_str
+            outline_el[3 + cell + cell*n_chambers + chamber] = out_str
+            
 
-    return outline_el, SNP
-
-
-def pr_chambers_BASIC(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, condensed_genotype_set):
-
-    probs = dict()
-    outline_el = ['*'] + ['*'] * (n_cells * n_chambers)
+    # "Basic" base calling, no cross-chamber info
 
     for cell in range(0,n_cells):  # for each cell
         for chamber in nonzero_chambers[cell]:
@@ -597,7 +579,6 @@ def pr_chambers_BASIC(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_alle
                 total = addlogs(total,p)
 
             res = []
-            max_allele = ('N',)
             max_posterior = -1
             for a,p in probs:
                 posterior = 10**(p - total)
@@ -605,14 +586,11 @@ def pr_chambers_BASIC(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_alle
 
                 if posterior > max_posterior:
                     max_posterior = posterior
-                    max_allele = a
-
-            if max_allele != (ref_allele,):
-                SNP = True
 
             out_str = ';'.join(['{}:{}'.format(''.join(a),p) for a,p in res])
 
-            outline_el[1 + cell*n_chambers + chamber] = out_str
+            outline_el[3 + cell + cell*n_chambers + chamber] += '|'+out_str
+
 
     return outline_el, SNP
 
@@ -709,7 +687,7 @@ def parse_bedfile(input_file):
 
 # boundary_files[cell*chamber+chamber] should hold name of bed file with fragment boundaries
 # use no_cross_chamber_info to ignore cross-chamber information
-def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only=False, no_cross_chamber_info=False, minimum_coverage=5):
+def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only=False):
 
     if boundary_files != None:
         fragment_boundaries = [[] for i in range(n_cells)]
@@ -816,7 +794,7 @@ def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only
             if SNPs_only and total_nonref < min_nonref:
                 continue
 
-            outline_el = ['*'] + ['*']*(n_chambers*n_cells)
+            outline_el = ['*','*'] + ['*']*((n_chambers+1)*n_cells)
 
             too_many_chambers = False
             for nz in nonzero_chambers:
@@ -851,25 +829,20 @@ def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only
 
                 pr_one_ch = precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers, fast_mode)
 
-                if no_cross_chamber_info:
-                    outline_el, SNP = pr_chambers_BASIC(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_base, condensed_genotype_set)
-                    tags.append('NO_CROSS_CHAMBER_INFO')
-                else:
-                    outline_el, SNP = pr_genotype(pr_one_ch, nonzero_chambers, ref_base, condensed_genotype_set)
+                outline_el, SNP = pr_genotype(pr_one_ch, nonzero_chambers,mixed_allele_priors, ref_base, condensed_genotype_set)
 
                 if SNP:
                     tags.append('SNP')
 
             for cell in range(n_cells):
                 for chamber in range(n_chambers):
-                    if len(base_data[cell][chamber]) < minimum_coverage:
-                        outline_el[1 + cell*n_chambers + chamber] = '*'
+                    if outline_el[3 + cell + cell*n_chambers + chamber] != '*':
+                        outline_el[3 + cell + cell*n_chambers + chamber] = outline_el[3 + cell + cell*n_chambers + chamber] + '|'+''.join(base_data[cell][chamber])
 
             outline_el = [chrom, str(pos+1), ref_base] + outline_el
             tag_info = ';'.join(tags) if tags != [] else 'N/A'
             outline_el.append(tag_info)
-            outline_el.append('PILEUP:')
-            outline_el = outline_el + el[3:]
+            outline_el = outline_el
             outline = '\t'.join(outline_el)
 
             print(outline, file=opf)

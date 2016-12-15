@@ -345,15 +345,16 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
     pickle.dump(genotype_priors, open("parameters/genotype_priors.p","wb"))
     pickle.dump(omega, open("parameters/omega.p","wb"))
 
-def obtain_counts_parallel(input_file, boundary_files, suffix=''):
+def obtain_counts_parallel(input_file, boundary_files=None, suffix=''):
 
-    #coverage_cut = 3
-
-    fragment_boundaries = [[] for i in range(n_cells)]
-    for cell in range(0,n_cells):  # for each cell
-        for chamber in range(0,n_chambers):
-            bfile = boundary_files[cell*n_chambers + chamber]
-            fragment_boundaries[cell].append(parse_bedfile(bfile))
+    coverage_cut = 3
+    
+    if boundary_files != None:
+        fragment_boundaries = [[] for i in range(n_cells)]
+        for cell in range(0,n_cells):  # for each cell
+            for chamber in range(0,n_chambers):
+                bfile = boundary_files[cell*n_chambers + chamber]
+                fragment_boundaries[cell].append(parse_bedfile(bfile))
 
     chrX_covs = defaultdict(int)
     chamber_position_counts = defaultdict(int)
@@ -377,36 +378,38 @@ def obtain_counts_parallel(input_file, boundary_files, suffix=''):
 
             for cell_num in range(n_cells):
                 for ch_num in range(n_chambers):
+                    
+                    if boundary_files != None:
 
-                    # ensure that position falls inside a called fragment
-                    if fragment_boundaries[cell_num][ch_num] == []:
-                        continue
-
-                    f_chrom, f_start, f_end = fragment_boundaries[cell_num][ch_num][0]
-
-                    # if we're behind fragment start, skip this spot
-                    if chr_num[chrom] < chr_num[f_chrom] or (chrom == f_chrom and pos < f_start):
-                        continue
-
-                    # if we're ahead of fragment start, skip to later fragment boundaries
-                    while 1:
+                        # ensure that position falls inside a called fragment
                         if fragment_boundaries[cell_num][ch_num] == []:
-                            break
+                            continue
+    
                         f_chrom, f_start, f_end = fragment_boundaries[cell_num][ch_num][0]
-                        if chr_num[chrom] > chr_num[f_chrom] or (chrom == f_chrom and pos >= f_end):
-                            fragment_boundaries[cell_num][ch_num].pop(0)
-                        else:
-                            break
-
-                    # if we're not inside fragment, continue
-                    if not(chrom == f_chrom and pos >= f_start and pos < f_end):
-                        continue
+    
+                        # if we're behind fragment start, skip this spot
+                        if chr_num[chrom] < chr_num[f_chrom] or (chrom == f_chrom and pos < f_start):
+                            continue
+    
+                        # if we're ahead of fragment start, skip to later fragment boundaries
+                        while 1:
+                            if fragment_boundaries[cell_num][ch_num] == []:
+                                break
+                            f_chrom, f_start, f_end = fragment_boundaries[cell_num][ch_num][0]
+                            if chr_num[chrom] > chr_num[f_chrom] or (chrom == f_chrom and pos >= f_end):
+                                fragment_boundaries[cell_num][ch_num].pop(0)
+                            else:
+                                break
+    
+                        # if we're not inside fragment, continue
+                        if not(chrom == f_chrom and pos >= f_start and pos < f_end):
+                            continue
 
 
                     flat_ix = cell_num * n_chambers + ch_num
                     col_ix = 3 + 4 * flat_ix
                     depth = int(el[col_ix])
-                    if depth == 0 or el[col_ix + 1] == '*':
+                    if depth < coverage_cut or el[col_ix + 1] == '*':
                         continue
 
                     if chrom == 'chrX':
