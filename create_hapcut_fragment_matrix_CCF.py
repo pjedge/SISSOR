@@ -1,6 +1,7 @@
 from math import log10
 from collections import defaultdict
 import os
+import sys
 
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
@@ -38,7 +39,7 @@ def parse_bedfile(input_file):
 
     return boundaries    
     
-def create_hapcut_fragment_matrix_CCF(chamber_call_file=in1, fragment_boundary_files=in2, output_dir=in3):
+def create_hapcut_fragment_matrix_CCF(chamber_call_file=in1, fragment_boundary_files=in2, output_dir=in3, genotype_cut=0.999, base_cut = 0.9999):
     
     fragment_boundaries = []
     for i in range(0,n_cells*n_chambers):
@@ -54,6 +55,8 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file=in1, fragment_boundary_f
         snp_ix = -1
         prev_ccf_chrom = None
         for line in ccf:
+            if len(line) < 3: # empty line
+                continue
             ccf_line = line.strip().split('\t')
             ccf_chrom = ccf_line[0]
 
@@ -70,13 +73,16 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file=in1, fragment_boundary_f
                 continue
             
             call = ccf_line[3]
+            
+            if call == '*':
+                continue
 
             el2 = call.split(';')
 
             genotype_prob = -1
             #max_genotype = 'NN'
             for entry in el2:
-
+                
                 genotype, prob = entry.split(':')
                 prob = float(prob)
 
@@ -84,6 +90,8 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file=in1, fragment_boundary_f
                     genotype_prob = prob
                     #max_genotype = genotype
 
+            if genotype_prob < genotype_cut:
+                continue
 
             for i, call in enumerate(ccf_line[4:76]):
                 
@@ -147,7 +155,8 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file=in1, fragment_boundary_f
                     p_err = 1e-10
                 qual = int(-10 * log10(p_err))
 
-                q_char = '~' if qual>=93 else chr(33 + qual)                
+                #q_char = '~' if qual>=93 else chr(33 + qual)                
+                q_char = '5'
                 
                 fragment_list[i][-1].append((snp_ix, ccf_chrom, ccf_pos, binary_allele, q_char, frg_start, frg_end, cell, ch_num))
             

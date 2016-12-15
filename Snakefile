@@ -29,6 +29,44 @@ from plot_sissor import plot_sissor
 if not os.path.exists(config['qsub_stdout_dir']):
     os.makedirs(config['qsub_stdout_dir'])
 
+chunksize = int(5e6)
+
+hg19_size_list = [('chr1', 249250621),
+ ('chr2', 243199373),
+ ('chr3', 198022430),
+ ('chr4', 191154276),
+ ('chr5', 180915260),
+ ('chr6', 171115067),
+ ('chr7', 159138663),
+ ('chr8', 146364022),
+ ('chr9', 141213431),
+ ('chr10', 135534747),
+ ('chr11', 135006516),
+ ('chr12', 133851895),
+ ('chr13', 115169878),
+ ('chr14', 107349540),
+ ('chr15', 102531392),
+ ('chr16', 90354753),
+ ('chr17', 81195210),
+ ('chr18', 78077248),
+ ('chr19', 59128983),
+ ('chr20', 63025520),
+ ('chr21', 48129895),
+ ('chr22', 51304566)]
+ #
+ #('chrX', 155270560),
+ #('chrY', 59373566)]
+
+# create chunks of hg19
+# return list of (chrom,start,stop) tuples. stop is inclusive
+chunklist = []
+
+for chrom, chrlen in hg19_size_list:
+    for start in range(1,chrlen+1,chunksize):
+        end = start+chunksize-1 if start+chunksize-1 < chrlen else chrlen
+        chunklist.append((chrom,start,end))
+
+regions = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in chunklist]
 
 # specify chambers
 data_dir = config["data_dir"]
@@ -93,7 +131,7 @@ rule calculate_error_rates:
                 frag_file     = "{}/PGP1_ALL/fragmat/{}/{}".format(data_dir,x,c)
                 vcf_file      = "{}/{}.vcf".format(variant_vcf_dir,c)
                 truth_file    = "{}/{}.filtered".format(config['BAC_hapblocks'], c)
-                err = error_rates.hapblock_hapblock_error_rate(truth_file, assembly_file, frag_file, vcf_file, runtime_file)
+                err = error_rates.hapblock_hapblock_error_rate(truth_file, assembly_file, frag_file, vcf_file, runtime_file, use_SNP_index=False)
                 datalist.append(err)
 
             print("{} results over all chromosomes:".format(x))
@@ -199,8 +237,8 @@ rule fix_fragmat:
 
 rule generate_fragmatrix:
     params: job_name = 'generate_fragmatrix'
-    input:  ccf      = 'base_calling/het_vcfs/cutoff3/whole_genome.out',
-            vcf      = 'base_calling/het_vcfs/cutoff3/whole_genome.vcf',
+    input:  ccf      = 'sissor_project/data/PGP1_ALL.het.whole_genome.ccf',
+            vcf      = 'sissor_project/data/PGP1_ALL.het.whole_genome.vcf',
             bounds   = expand('base_calling/fragment_boundary_beds/{ce}/ch{ch}.bed',ch=chambers,ce=cells),
     output: fragmat  = expand('sissor_project/data/PGP1_ALL/augmented_fragmat/{c}',c=chroms),
             vcfs     = expand('sissor_project/data/PGP1_VCFs/{c}.vcf',c=chroms)
@@ -213,6 +251,48 @@ rule generate_fragmatrix:
         #split vcf file into separate chromosome VCF files
         for chrom in chroms:
             shell('grep -P "^{chrom}\t" {input.vcf} > sissor_project/data/PGP1_VCFs/{chrom}.vcf')
+
+rule combine_filtered:
+    params: job_name = 'combine_filtered'
+    input:  ccf = expand('sissor_project/data/ccf_split/{r}.ccf',r=regions),
+            vcf = expand('sissor_project/data/vcf_split/{r}.vcf',r=regions)
+    output: ccf = 'sissor_project/data/PGP1_ALL.het.whole_genome.ccf',
+            vcf = 'sissor_project/data/PGP1_ALL.het.whole_genome.vcf',
+    shell:
+        '''cat {input.ccf} > {output.ccf}
+           cat {input.vcf} > {output.vcf}'''
+
+rule filter_CCF:
+    params: job_name = 'filter_CCF_{chrom}.{start}.{end}'
+    input:  ccf      = 'base_calling/output/split/{chrom}.{start}.{end}.out',
+            vcf      = 'sissor_project/data/PGP1_VCFs_old/all.vcf'
+    output: ccf      = 'sissor_project/data/ccf_split/{chrom}.{start}.{end}.ccf',
+            vcf      = 'sissor_project/data/vcf_split/{chrom}.{start}.{end}.vcf',
+    run:
+        het_pos = dict()
+        reg_chrom = str(wildcards.chrom)
+        reg_start = int(wildcards.start)
+        reg_end   = int(wildcards.end)
+        with open(input.vcf,'r') as vcf_file:
+            for line in vcf_file:
+                if len(line) < 3:
+                    continue
+                el = line.strip().split('\t')
+                chrom = el[0]
+                pos   = int(el[1])
+                if chrom == reg_chrom and pos <= reg_end and pos >= reg_start:
+                    het_pos[(chrom,pos)] = line.strip()
+
+        with open(input.ccf,'r') as infile, open(output.ccf,'w') as ccf_out, open(output.vcf,'w') as vcf_out:
+            for line in infile:
+                if len(line) < 3:
+                    continue
+                el = line.strip().split('\t')
+                chrom = el[0]
+                pos   = int(el[1])
+                if (chrom,pos) in het_pos:
+                    print(line.strip(),file=ccf_out)
+                    print(het_pos[(chrom,pos)],file=vcf_out)
 
 # COMBINE FRAGMENT MATRICES
 '''
@@ -250,35 +330,69 @@ rule create_augmented_fragmat:
 
 rule simlinks:
     input:
-        expand("{DIR}/PGP1_21_ch{chpad}.freebayes.remap.depth.new.vcf",DIR=config['PGP1_21_ploidy1'],chpad=chambers_pad),
-        expand("{DIR}/PGP1_21_ch{chpad}.ploidy2.freebayes.depth.vcf",DIR=config['PGP1_21_ploidy2'],chpad=chambers_pad),
-        expand("{DIR}/ch{ch}.bed",DIR=config['PGP1_21_beds'],ch=chambers),
-        expand("{DIR}/PGP1_22_ch{chpad}.freebayes.remap.depth.vcf",DIR=config['PGP1_22_ploidy1'],chpad=chambers_pad),
-        expand("{DIR}/PGP1_22_ch{chpad}.ploidy2.freebayes.vcf",DIR=config['PGP1_22_ploidy2'],chpad=chambers_pad),
-        expand("{DIR}/ch{ch}.bed",DIR=config['PGP1_22_beds'],ch=chambers),
-        expand("{DIR}/PGP1_A1_ch{chpad}.freebayes.allpos.vcf",DIR=config['PGP1_A1_ploidy1'],chpad=chambers_pad),
-        expand("{DIR}/PGP1_A1_ch{chpad}.freebayes.ploidy2.allpos.vcf",DIR=config['PGP1_A1_ploidy2'],chpad=chambers_pad),
-        expand("{DIR}/ch{ch}.bed",DIR=config['PGP1_A1_beds'],ch=chambers),
+        #expand("{DIR}/PGP1_21_ch{chpad}.freebayes.remap.depth.new.vcf",DIR=config['PGP1_21_ploidy1'],chpad=chambers_pad),
+        #expand("{DIR}/PGP1_21_ch{chpad}.ploidy2.freebayes.depth.vcf",DIR=config['PGP1_21_ploidy2'],chpad=chambers_pad),
+        expand("{DIR}/PGP1_21_FragmentBoundaryCh{ch}.bed",DIR=config['PGP1_21_beds'],ch=chambers),
+        #expand("{DIR}/PGP1_22_ch{chpad}.freebayes.remap.depth.vcf",DIR=config['PGP1_22_ploidy1'],chpad=chambers_pad),
+        #expand("{DIR}/PGP1_22_ch{chpad}.ploidy2.freebayes.vcf",DIR=config['PGP1_22_ploidy2'],chpad=chambers_pad),
+        expand("{DIR}/PGP1_22_FragmentBoundaryCh{ch}.bed",DIR=config['PGP1_22_beds'],ch=chambers),
+        #expand("{DIR}/PGP1_A1_ch{chpad}.freebayes.allpos.vcf",DIR=config['PGP1_A1_ploidy1'],chpad=chambers_pad),
+        #expand("{DIR}/PGP1_A1_ch{chpad}.freebayes.ploidy2.allpos.vcf",DIR=config['PGP1_A1_ploidy2'],chpad=chambers_pad),
+        expand("{DIR}/PGP1_A1_FragmentBoundaryCh{ch}.bed",DIR=config['PGP1_A1_beds'],ch=chambers),
     run:
         for ch,chpad in zip(chambers,chambers_pad):
             shell('''
             mkdir -p {data_dir}/PGP1_21/ploidy1
             mkdir -p {data_dir}/PGP1_21/ploidy2
             mkdir -p {data_dir}/PGP1_21/beds
-            ln -s {config[PGP1_21_ploidy1]}/PGP1_21_ch{chpad}.freebayes.remap.depth.new.vcf {data_dir}/PGP1_21/ploidy1/ch{ch}.vcf
-            ln -s {config[PGP1_21_ploidy2]}/PGP1_21_ch{chpad}.ploidy2.freebayes.depth.vcf {data_dir}/PGP1_21/ploidy2/ch{ch}.vcf
+            #ln -s {config[PGP1_21_ploidy1]}/PGP1_21_ch{chpad}.freebayes.remap.depth.new.vcf {data_dir}/PGP1_21/ploidy1/ch{ch}.vcf
+            #ln -s {config[PGP1_21_ploidy2]}/PGP1_21_ch{chpad}.ploidy2.freebayes.depth.vcf {data_dir}/PGP1_21/ploidy2/ch{ch}.vcf
+            ln -s {config[PGP1_21_beds]}/PGP1_21_FragmentBoundaryCh{ch}.bed {data_dir}/PGP1_21/beds/ch{ch}.bed
+            mkdir -p {data_dir}/PGP1_22/ploidy1
+            mkdir -p {data_dir}/PGP1_22/ploidy2
+            mkdir -p {data_dir}/PGP1_22/beds
+            #ln -s {config[PGP1_22_ploidy1]}/PGP1_22_ch{chpad}.freebayes.remap.depth.new.vcf {data_dir}/PGP1_22/ploidy1/ch{ch}.vcf
+            #ln -s {config[PGP1_22_ploidy2]}/PGP1_22_ch{chpad}.ploidy2.freebayes.vcf {data_dir}/PGP1_22/ploidy2/ch{ch}.vcf
+            ln -s {config[PGP1_22_beds]}/PGP1_22_FragmentBoundaryCh{ch}.bed {data_dir}/PGP1_22/beds/ch{ch}.bed
+            mkdir -p {data_dir}/PGP1_A1/ploidy1
+            mkdir -p {data_dir}/PGP1_A1/ploidy2
+            mkdir -p {data_dir}/PGP1_A1/beds
+            #ln -s {config[PGP1_A1_ploidy1]}/PGP1_A1_ch{chpad}.freebayes.allpos.vcf {data_dir}/PGP1_A1/ploidy1/ch{ch}.vcf
+            #ln -s {config[PGP1_A1_ploidy2]}/PGP1_A1_ch{chpad}.freebayes.ploidy2.allpos.vcf {data_dir}/PGP1_A1/ploidy2/ch{ch}.vcf
+            ln -s {config[PGP1_A1_beds]}/PGP1_A1_FragmentBoundaryCh{ch}.bed {data_dir}/PGP1_A1/beds/ch{ch}.bed
+            ''')
+
+rule simlinks_new:
+    input:
+        #expand("{DIR}/PGP1_21_ch{chpad}.freebayes.remap.depth.new.vcf",DIR=config['PGP1_21_ploidy1'],chpad=chambers_pad),
+        #expand("{DIR}/PGP1_21_ch{chpad}.ploidy2.freebayes.depth.vcf",DIR=config['PGP1_21_ploidy2'],chpad=chambers_pad),
+        expand("{DIR}/ch{ch}.bed",DIR=config['PGP1_21_beds'],ch=chambers_pad),
+        #expand("{DIR}/PGP1_22_ch{chpad}.freebayes.remap.depth.vcf",DIR=config['PGP1_22_ploidy1'],chpad=chambers_pad),
+        #expand("{DIR}/PGP1_22_ch{chpad}.ploidy2.freebayes.vcf",DIR=config['PGP1_22_ploidy2'],chpad=chambers_pad),
+        expand("{DIR}/ch{ch}.bed",DIR=config['PGP1_22_beds'],ch=chambers_pad),
+        #expand("{DIR}/PGP1_A1_ch{chpad}.freebayes.allpos.vcf",DIR=config['PGP1_A1_ploidy1'],chpad=chambers_pad),
+        #expand("{DIR}/PGP1_A1_ch{chpad}.freebayes.ploidy2.allpos.vcf",DIR=config['PGP1_A1_ploidy2'],chpad=chambers_pad),
+        expand("{DIR}/ch{ch}.bed",DIR=config['PGP1_A1_beds'],ch=chambers_pad),
+    run:
+        for ch,chpad in zip(chambers,chambers_pad):
+            shell('''
+            mkdir -p {data_dir}/PGP1_21/ploidy1
+            mkdir -p {data_dir}/PGP1_21/ploidy2
+            mkdir -p {data_dir}/PGP1_21/beds
+            #ln -s {config[PGP1_21_ploidy1]}/PGP1_21_ch{chpad}.freebayes.remap.depth.new.vcf {data_dir}/PGP1_21/ploidy1/ch{ch}.vcf
+            #ln -s {config[PGP1_21_ploidy2]}/PGP1_21_ch{chpad}.ploidy2.freebayes.depth.vcf {data_dir}/PGP1_21/ploidy2/ch{ch}.vcf
             ln -s {config[PGP1_21_beds]}/ch{ch}.bed {data_dir}/PGP1_21/beds/ch{ch}.bed
             mkdir -p {data_dir}/PGP1_22/ploidy1
             mkdir -p {data_dir}/PGP1_22/ploidy2
             mkdir -p {data_dir}/PGP1_22/beds
-            ln -s {config[PGP1_22_ploidy1]}/PGP1_22_ch{chpad}.freebayes.remap.depth.new.vcf {data_dir}/PGP1_22/ploidy1/ch{ch}.vcf
-            ln -s {config[PGP1_22_ploidy2]}/PGP1_22_ch{chpad}.ploidy2.freebayes.vcf {data_dir}/PGP1_22/ploidy2/ch{ch}.vcf
+            #ln -s {config[PGP1_22_ploidy1]}/PGP1_22_ch{chpad}.freebayes.remap.depth.new.vcf {data_dir}/PGP1_22/ploidy1/ch{ch}.vcf
+            #ln -s {config[PGP1_22_ploidy2]}/PGP1_22_ch{chpad}.ploidy2.freebayes.vcf {data_dir}/PGP1_22/ploidy2/ch{ch}.vcf
             ln -s {config[PGP1_22_beds]}/ch{ch}.bed {data_dir}/PGP1_22/beds/ch{ch}.bed
             mkdir -p {data_dir}/PGP1_A1/ploidy1
             mkdir -p {data_dir}/PGP1_A1/ploidy2
             mkdir -p {data_dir}/PGP1_A1/beds
-            ln -s {config[PGP1_A1_ploidy1]}/PGP1_A1_ch{chpad}.freebayes.allpos.vcf {data_dir}/PGP1_A1/ploidy1/ch{ch}.vcf
-            ln -s {config[PGP1_A1_ploidy2]}/PGP1_A1_ch{chpad}.freebayes.ploidy2.allpos.vcf {data_dir}/PGP1_A1/ploidy2/ch{ch}.vcf
+            #ln -s {config[PGP1_A1_ploidy1]}/PGP1_A1_ch{chpad}.freebayes.allpos.vcf {data_dir}/PGP1_A1/ploidy1/ch{ch}.vcf
+            #ln -s {config[PGP1_A1_ploidy2]}/PGP1_A1_ch{chpad}.freebayes.ploidy2.allpos.vcf {data_dir}/PGP1_A1/ploidy2/ch{ch}.vcf
             ln -s {config[PGP1_A1_beds]}/ch{ch}.bed {data_dir}/PGP1_A1/beds/ch{ch}.bed
             ''')
 
