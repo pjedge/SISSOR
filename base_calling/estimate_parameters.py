@@ -16,7 +16,6 @@ from pdb import set_trace
 from collections import defaultdict
 import random
 import bisect
-from call_chamber_alleles import addlogs
 import math
 if False:
     set_trace() # to dodge warnings that pdb isn't being used.
@@ -38,10 +37,38 @@ genotypes = list(itertools.combinations_with_replacement(bases,2))
 het_snp_rate = 0.0005
 hom_snp_rate = 0.001
 n_cells = 3
+chr_num = dict()
+for i,chrom in enumerate(chroms):
+    chr_num[chrom] = i
 
 ###############################################################################
 # HELPER FUNCTIONS
 ###############################################################################
+
+def addlogs(a,b):
+    if a > b:
+        return a + log10(1 + pow(10, b - a))
+    else:
+        return b + log10(1 + pow(10, a - b))
+
+def parse_bedfile(input_file):
+
+    boundaries = []
+    with open(input_file,'r') as inf:
+        for line in inf:
+
+            if len(line) < 3:
+                continue
+
+            el = line.strip().split('\t')
+
+            chrom = el[0]
+            start = int(el[1])
+            stop  = int(el[2])
+
+            boundaries.append((chrom, start, stop))
+
+    return boundaries
 
 # product of list
 def prod(iterable): # credit to: http://stackoverflow.com/questions/7948291/is-there-a-built-in-product-in-python
@@ -115,7 +142,6 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
         for i, count in enumerate(cov_frac_dist_raw_counts[cov]):
             cov_frac_dist_raw[cov].append(count/sum(cov_frac_dist_raw_counts[cov]))
         assert(len(cov_frac_dist_raw[cov]) == cov)
-
 
     lim = 30
     for i in range(1,lim+1):
@@ -319,9 +345,16 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
     pickle.dump(genotype_priors, open("parameters/genotype_priors.p","wb"))
     pickle.dump(omega, open("parameters/omega.p","wb"))
 
-def obtain_counts_parallel(input_file, suffix=''):
+def obtain_counts_parallel(input_file, boundary_files=None, suffix=''):
 
     coverage_cut = 3
+    
+    if boundary_files != None:
+        fragment_boundaries = [[] for i in range(n_cells)]
+        for cell in range(0,n_cells):  # for each cell
+            for chamber in range(0,n_chambers):
+                bfile = boundary_files[cell*n_chambers + chamber]
+                fragment_boundaries[cell].append(parse_bedfile(bfile))
 
     chrX_covs = defaultdict(int)
     chamber_position_counts = defaultdict(int)
@@ -334,6 +367,7 @@ def obtain_counts_parallel(input_file, suffix=''):
             el = line.strip().split('\t')
 
             chrom = el[0]
+            pos   = int(el[1]) - 1
             ref_base = str.upper(el[2])
 
             if ref_base == 'N':
@@ -344,6 +378,33 @@ def obtain_counts_parallel(input_file, suffix=''):
 
             for cell_num in range(n_cells):
                 for ch_num in range(n_chambers):
+                    
+                    if boundary_files != None:
+
+                        # ensure that position falls inside a called fragment
+                        if fragment_boundaries[cell_num][ch_num] == []:
+                            continue
+    
+                        f_chrom, f_start, f_end = fragment_boundaries[cell_num][ch_num][0]
+    
+                        # if we're behind fragment start, skip this spot
+                        if chr_num[chrom] < chr_num[f_chrom] or (chrom == f_chrom and pos < f_start):
+                            continue
+    
+                        # if we're ahead of fragment start, skip to later fragment boundaries
+                        while 1:
+                            if fragment_boundaries[cell_num][ch_num] == []:
+                                break
+                            f_chrom, f_start, f_end = fragment_boundaries[cell_num][ch_num][0]
+                            if chr_num[chrom] > chr_num[f_chrom] or (chrom == f_chrom and pos >= f_end):
+                                fragment_boundaries[cell_num][ch_num].pop(0)
+                            else:
+                                break
+    
+                        # if we're not inside fragment, continue
+                        if not(chrom == f_chrom and pos >= f_start and pos < f_end):
+                            continue
+
 
                     flat_ix = cell_num * n_chambers + ch_num
                     col_ix = 3 + 4 * flat_ix

@@ -95,14 +95,14 @@ def get_het_breakpoints(frag,min_het_count=3,max_het_frac=0.25):
     breaks = []
 
     for i in range(len(frag.seq)):
-        if frag.seq[i][2] != '2':
+        if frag.seq[i][2] != 'M':
             continue
 
         hom_count = 0
         het_count = 0
 
         for j in range(i,len(frag.seq)):
-            if frag.seq[j][2] == '2':
+            if frag.seq[j][2] == 'M':
                 het_count += 1
 
                 het_frac = het_count/(hom_count+het_count)
@@ -134,7 +134,7 @@ def split_fragment_hets(frag,min_het_count=3,max_het_frac=0.25):
                 new_fragment_pieces.append(new_piece)
             new_piece = []
         else:
-            if call != '2':
+            if call != 'M':
                 new_piece.append((pos,gpos,call,qual))
 
     if len(new_piece) >= 2:
@@ -171,7 +171,7 @@ def filter_flist_heterozygousity(flist,max_het=0.1):
         het_count = 0
 
         for pos, gpos, call, qual in f.seq:
-            if call == '2':
+            if call == 'M':
                 het_count += 1
             elif call == '1' or call == '0':
                 hom_count += 1
@@ -430,7 +430,7 @@ def add_new_boundaries(flist):
         flist[i].name = '{}:{}-{}'.format(flist[i].name,flist[i].seq[0][1]+1,flist[i].seq[-1][1]+1)
 
         for a in flist[i].seq:
-            assert(a[2] != '2') # one last check that we didn't leave in a heterozygous call
+            assert(a[2] != 'M') # one last check that we didn't leave in a heterozygous call
 
     return flist
 
@@ -446,7 +446,7 @@ def filter_het_positions(flist):
         for a in f.seq:
 
             # if coverage greater than 1
-            if a[2] != '2':
+            if a[2] != 'M':
 
                 new_seq.append(a)
 

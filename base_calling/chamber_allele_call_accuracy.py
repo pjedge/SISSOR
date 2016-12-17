@@ -5,141 +5,446 @@ Created on Mon Oct  3 18:29:04 2016
 
 @author: peter
 """
+import pickle
+import re
+import pysam
+
+GMS_LIMIT = 0.5
+chroms = set(['chr{}'.format(i) for i in range(1,23)])
+bases = {'A','T','G','C'}
+
+ref_allele_re = re.compile('ref_allele ([ACGT])')
+
+def split_vcf(input_vcf, chunklist, output_vcfs):
+
+    regions_output = list(zip(chunklist, output_vcfs))
+    (chrom, start, stop), outputfile = regions_output.pop(0)
+    output = open(outputfile, 'w')
+    with open(input_vcf,'r') as vcf:
+        for line in vcf:
+            if line[0] == '#' or len(line) < 3:
+                continue
+
+            vcf_line = line.strip().split('\t')
+
+            vcf_chrom = vcf_line[0]
+            vcf_pos = int(vcf_line[1])
+
+            if vcf_chrom != chrom or vcf_pos > stop:
+
+                done = False
+                while not (vcf_chrom == chrom and vcf_pos >= start and vcf_pos <= stop):
+                    output.close()
+                    if len(regions_output) == 0:
+                        done = True
+                        break
+                    (chrom, start, stop), outputfile = regions_output.pop(0)
+                    output = open(outputfile, 'w')
+                if done:
+                    break
+
+            # write to lifted over vcf
+            print(line,end='',file=output)
+
+    if not output.closed:
+        output.close()
+
+# this takes the genome mappability score (GMS) files and splits them into
+# convenient 5 Mb chunks, corresponding to regions called by sissorhands
+def split_gms(infiles, chunklist, outputlst):
+
+    chunks_output = list(zip(chunklist, outputlst))
+
+    for infile in infiles:
+        (chrom, start, stop), outputfile = chunks_output.pop(0)
+        assert(start == 1)              # should be beginning of chrom
+        assert(chrom+'.gms' in infile)  # file should have chrom name
+        output = open(outputfile,'w')
+        with open(infile,'r') as gms:
+            for line in gms:
+                if line[0] == '#' or len(line) < 3:
+                    continue
+                el = line.strip().split('\t')
+
+                gms_chrom     = el[0]
+                gms_pos       = int(el[1])
+
+                if gms_pos > stop:
+                    output.close()
+                    if chunks_output == []:
+                        break
+                    (chrom, start, stop), outputfile = chunks_output.pop(0)
+                    output = open(outputfile,'w')
+
+                # make sure we're really on the current region
+                assert(gms_chrom == chrom)
+                assert(gms_pos >= start)
+                assert(gms_pos <= stop)
+
+                print(line,end='',file=output)
+
+    if not output.closed:
+        output.close()
 
 # chamber call file has results from SISSOR cross-chamber allele calls
 # GFF file has set of known alleles for individual (for comparison)
+# VCF file has another set of heterozygous SNVs for individual
 # cutoff is the minimum probability of an allele call to use it
 # result outfile simply contains the counts of match vs mismatched alleles
 # mismatch_outfile prints locations of mismatched allele calls
-def chamber_allele_call_accuracy(chamber_call_file, GFF_file, cutoff, result_outfile, mismatch_outfile):
+def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_file, HG19, region, cutoff, counts_pickle_file, mismatch_outfile): #WGS_VCF_file,
 
-    with open(chamber_call_file,'r') as ccf, open(GFF_file,'r') as gff, open(result_outfile,'w') as rof, open(mismatch_outfile,'w') as mof:
-        print('chr\tpos\tsissor_call\tCGI_allele\tref',file=mof)
-        chroms = ['chr{}'.format(x) for x in range(1,23)] + ['chrX','chrY']
-        def read_ccf_line():
-            ccf_line  = ccf.readline()
-            if not ccf_line or len(ccf_line) < 3:
-                return None,None,None,None
+    dp_pat = re.compile("DP=(\d+)")
+    qr_pat = re.compile(";QR=(\d+)")
+    type_pat = re.compile("TYPE=([^;]+);")
+    region_chrom, region_start, region_end = region
+    truth_dict = dict()
+    gms_set    = set()
+    hg19_fasta = pysam.FastaFile(HG19)
 
-            ccf_line = ccf_line.strip().split('\t')
+    # add heterozygous alleles observed in one CGI dataset to a dictionary
+    with open(GFF_file,'r') as gff:
+        for line in gff:
+            if line[0] == '#' or len(line) < 3:
+                continue
+            gff_line = line.strip().split('\t')
+
+            if gff_line[2] == 'SNP':
+
+                gff_chrom = gff_line[0]
+                gff_pos   = int(gff_line[3])
+                if not (gff_chrom == region_chrom and gff_pos >= region_start and gff_pos <= region_end):
+                    continue
+
+                assert(gff_pos == int(gff_line[4]))
+
+                infoline = gff_line[8]
+                info = infoline.strip().split(';')
+                a_info = info[0]
+                assert('alleles' in a_info)
+                a_info = a_info[8:]
+
+                ref_allele = None
+                found = re.findall(ref_allele_re, infoline)
+                if len(found) > 0:
+                    ref_allele = found[0]
+
+                if len(a_info) == 1:
+                    alleles = {a_info}
+                elif len(a_info) == 3:
+                    alleles = {a_info[0],a_info[2]}
+                else:
+                    print("Unexpected number of alleles")
+                    assert(False)
+
+                if (gff_chrom,gff_pos) in truth_dict:
+                    truth_dict[(gff_chrom,gff_pos)] = truth_dict[(gff_chrom,gff_pos)].union(alleles)
+                else:
+                    truth_dict[(gff_chrom,gff_pos)] = alleles
+                    # we observed only 1 SNP allele and hasn't been seen in other datasets
+                    # add reference base because of this CGI dataset's base false negative rate
+                    if len(alleles) == 1 and ref_allele != None:
+                        truth_dict[(gff_chrom,gff_pos)] = truth_dict[(gff_chrom,gff_pos)].union({ref_allele})
+
+            elif gff_line[2] == 'REF':
+
+                gff_chrom   = gff_line[0]
+                gff_start   = int(gff_line[3])
+                gff_end     = int(gff_line[4])
+                if not ((gff_chrom == region_chrom and gff_start >= region_start and gff_start <= region_end) or
+                        (gff_chrom == region_chrom and gff_end >= region_start and gff_end <= region_end)):
+                    continue
+
+                for gff_pos in range(gff_start, gff_end+1):
+
+                    ref_lookup = str.upper(hg19_fasta.fetch(gff_chrom, gff_pos-1, gff_pos))  # pysam uses 0-index
+
+                    if ref_lookup not in bases:  # e.g. 'N' alleles
+                        continue
+
+                    if (gff_chrom,gff_pos) in truth_dict:
+                        truth_dict[(gff_chrom,gff_pos)] = truth_dict[(gff_chrom,gff_pos)].union({ref_lookup})
+                    else:
+                        truth_dict[(gff_chrom,gff_pos)] = {ref_lookup}
+
+
+    # add heterozygous SNVs observed in our second CGI dataset to the dictionary
+    with open(CGI_VCF_file,'r') as vcf:
+        for line in vcf:
+            if line[0] == '#' or len(line) < 3:
+                continue
+
+            vcf_line = line.strip().split('\t')
+
+            vcf_chrom = vcf_line[0]
+            vcf_pos   = int(vcf_line[1])
+
+            if not (vcf_chrom == region_chrom and vcf_pos >= region_start and vcf_pos <= region_end):
+                continue
+
+            alleles = {vcf_line[3],vcf_line[4]}
+
+            if (vcf_chrom,vcf_pos) in truth_dict:
+                truth_dict[(vcf_chrom,vcf_pos)] = truth_dict[(vcf_chrom,vcf_pos)].union(alleles)
+            else:
+                truth_dict[(vcf_chrom,vcf_pos)] = alleles
+
+
+    # add SNVs seen in WGS dataset to dictionary
+    with open(WGS_VCF_file,'r') as vcf:
+        for line in vcf:
+            if line[0] == '#' or len(line) < 3:
+                continue
+
+            vcf_line = line.strip().split('\t')
+            fields = vcf_line[7]
+            pos_type = re.findall(type_pat,line)
+            depth = int(float(re.findall(dp_pat,fields)[0]))
+            if depth < 20:
+                continue
+
+            # we only care about reference and SNPs, no indels or MNPs
+            if not(pos_type == [] or pos_type[0] == 'snp'):
+                continue
+            if not (len(vcf_line[3]) == 1 and len(vcf_line[4]) == 1):
+                continue
+
+            if vcf_line[8][0:2] != 'GT':
+                continue
+            genotype = vcf_line[9][0:3]
+            qual = int(float(re.findall(qr_pat,fields)[0])) if genotype == '0/0' else float(vcf_line[5])
+
+            if qual < 100:
+                continue
+
+
+            vcf_chrom = vcf_line[0]
+            vcf_pos = int(vcf_line[1])
+            ref_allele = str.upper(vcf_line[3])
+            variant_allele = str.upper(vcf_line[4][0])
+            third_allele = 'N'
+            if len(vcf_line[4]) == 3:
+                third_allele = str.upper(vcf_line[4][2])
+
+            alleles = set()
+
+            if '0' in genotype:
+                alleles.add(ref_allele)
+            if '1' in genotype:
+                alleles.add(variant_allele)
+            if '2' in genotype:
+                alleles.add(third_allele)
+
+            # skip cases with N alleles, or with any other unusual cases
+            if len(alleles.intersection(bases)) != len(alleles):
+                continue
+
+            if (vcf_chrom,vcf_pos) in truth_dict:
+                truth_dict[(vcf_chrom,vcf_pos)] = truth_dict[(vcf_chrom,vcf_pos)].union(alleles)
+            #else:
+            #    truth_dict[(vcf_chrom,vcf_pos)] = alleles
+
+
+    with open(GMS_file,'r') as GMS:
+        for line in GMS:
+            if line[0] == '#' or len(line) < 3:
+                continue
+            el = line.strip().split('\t')
+
+            chrom     = el[0]
+            pos       = int(el[1])
+            gms_score = float(el[5])
+
+            if not (chrom == region_chrom and pos >= region_start and pos <= region_end):
+                continue
+
+            if gms_score > GMS_LIMIT:
+                gms_set.add((chrom, pos))
+
+    mismatch     = 0
+    total_called = 0
+    total_known  = 0
+    snv_mismatch = 0
+    snv_match    = 0
+
+    with open(chamber_call_file,'r') as ccf, open(mismatch_outfile,'w') as mof:
+        #print('chr\tpos\tsissor_call\tCGI_allele\tref',file=mof)
+        for line in ccf:
+            ccf_line = line.strip().split('\t')
             ccf_chrom = ccf_line[0]
             ccf_pos   = int(ccf_line[1])
+
+            if not (ccf_chrom == region_chrom and ccf_pos >= region_start and ccf_pos <= region_end):
+                continue
+
+            if (ccf_chrom, ccf_pos) not in gms_set:  # poor mappability
+                continue
+
             ref_allele = ccf_line[2]
 
-            alleles = []
+            tags = ccf_line[80].split(';')
 
-            for call in ccf_line[3:-1]:
+            if ccf_chrom == 'chrX' or ccf_chrom == 'chrY':
+                continue
+
+            if 'TOO_MANY_ALLELES' in tags or 'TOO_MANY_CHAMBERS' in tags or 'ADJACENT_INDEL_OR_CLIP' in tags:
+                continue
+
+            call = ccf_line[3]
+
+            if call == '*':
+                continue
+
+            el2 = call.split(';')
+
+            alleles = set()
+            for entry in el2:
+
+                allele, prob = entry.split(':')
+                prob = float(prob)
+
+                if prob > cutoff:
+                    alleles.add(allele)
+                    #max_genotype = genotype
+
+            if len(alleles) == 0:
+                continue
+
+            '''
+            ccf_alleles       = []
+            has_allele_mix = False
+
+            base_call_list = [x for x in ccf_line[5:80] if 'CELL' not in x]
+
+            for call in base_call_list:
                 if call == '*':
                     continue
 
-                el2 = call.split(';')
+                xchamber_calls, basic_calls, pileup = call.split('|')
 
+                el2 = xchamber_calls.split(';')
+
+                max_prob = -1
+                max_allele = 'N'
                 for entry in el2:
 
                     a_info, prob = entry.split(':')
                     prob = float(prob)
 
-                    if prob > cutoff:
-                        if len(a_info) == 1:
-                            allele = {a_info}
-                        elif len(a_info) == 2:
-                            allele = {a_info[0],a_info[1]}
-                        alleles.append(allele)
+                    if len(a_info) == 1:
+                        allele = {a_info}
+                    elif len(a_info) == 2:
+                        allele = {a_info[0],a_info[1]}
 
-            return ccf_chrom, ccf_pos, alleles, ref_allele
+                    if prob > max_prob:
+                        max_prob = prob
+                        max_allele = allele
 
-        def read_gff_line():
-            gff_line  = ['#',0,0,0]
-            while gff_line[0][0] == '#' or gff_line[2] != 'SNP':
-                gff_line  = gff.readline()
-                if not gff_line:
-                    return None,None,None,None
-                gff_line = gff_line.strip().split('\t')
-
-            gff_chrom = gff_line[0]
-            gff_pos   = int(gff_line[3])
-
-            assert(gff_pos == int(gff_line[4]))
-
-            info = gff_line[8].strip().split(';')
-            a_info = info[0]
-            assert('alleles' in a_info)
-            a_info = a_info[8:]
-
-            r_info = info[2]
-            assert('ref_allele' in r_info)
-            ref_allele = r_info[10:]
-
-            if len(a_info) == 1:
-                alleles = {a_info}
-            elif len(a_info) == 3:
-                alleles = {a_info[0],a_info[2]}
-            else:
-                print("Unexpected number of alleles")
-                assert(False)
-
-            return gff_chrom, gff_pos, alleles, ref_allele
-
-        match = 0
-        mismatch = 0
-
-        i = 0
-        ccf_chrom = None
-        gff_chrom = None
-        ref_allele = None
-        while i < len(chroms):
-
-            chrom = chroms[i]
-
-            while ccf_chrom != chrom:
-                ccf_chrom, ccf_pos, ccf_alleles, ref_allele = read_ccf_line()
-                if not ccf_chrom:
+                if len(max_allele) == 2:
+                    has_allele_mix = True
                     break
-            while gff_chrom != chrom:
-                gff_chrom, gff_pos, gff_alleles, ref_allele2 = read_gff_line()
-                if not gff_chrom:
-                    break
-            # leave these out for now
-            if chrom == 'chrX' or chrom == 'chrY':
-                i += 1
+                elif len(max_allele) == 1:
+                    ccf_alleles.append(max_allele)
+
+            if has_allele_mix:
                 continue
-            # in this loop, both files are considering positions of same chromosome
-            while True:
+            '''
+            total_called += 1
 
-                while ccf_chrom == chrom and gff_chrom == chrom and ccf_pos != gff_pos:
-                    if ccf_pos < gff_pos:
-                        ccf_chrom, ccf_pos, ccf_alleles, ref_allele = read_ccf_line()
-                    elif gff_pos < ccf_pos:
-                        gff_chrom, gff_pos, gff_alleles, ref_allele2 = read_gff_line()
+            if (ccf_chrom,ccf_pos) not in truth_dict:
+                continue
 
-                if gff_chrom != chrom or ccf_chrom != chrom:
-                    i += 1
-                    break
+            total_known += 1
 
-                assert(ccf_chrom == gff_chrom)
-                assert(ccf_pos   == gff_pos)
+            # alleles should be a subset of observed alleles
+            # else we call it a mismatch
+            if not (alleles <= truth_dict[(ccf_chrom,ccf_pos)]):
 
-                # do stuff with data lines
+                if alleles != {ref_allele}:
+                    snv_mismatch += 1
 
-                for allele in ccf_alleles:
+                mismatch += 1
+                cgi_set = truth_dict[(ccf_chrom,ccf_pos)]
+                tag = "OTHERS:{};SISSOR:{}".format(''.join(cgi_set),''.join(alleles))
+                el = line.strip().split('\t')
+                if el[-1] == 'N/A':
+                    el[-1] = tag
+                else:
+                    el[-1] = '{};{}'.format(el[-1], tag)
 
-                    if allele <= gff_alleles:
+                print('\t'.join(el),file=mof)
 
-                        match += 1
+            elif allele != {ref_allele} and alleles <= truth_dict[(ccf_chrom,ccf_pos)]:
 
-                    else:
+                snv_match += 1
 
-                        mismatch += 1
-                        print("{}\t{}\t{}\t{}\t{}".format(ccf_chrom,ccf_pos,''.join(allele),''.join(gff_alleles), ref_allele),file=mof)
+    counts = (mismatch, total_known, snv_mismatch, snv_match, total_called, cutoff)
+    pickle.dump(counts,open(counts_pickle_file,'wb'))
+
+def accuracy_aggregate(counts_pickle_files, result_outfile):
+
+    mismatch     = 0
+    total_known  = 0
+    total_called = 0
+    snv_mismatch = 0
+    snv_match    = 0
+    cutoff = None
+    for pfile in counts_pickle_files:
+        (mismatch0, total_known0, snv_mismatch0, snv_match0, total_called0, cutoff0) = pickle.load(open(pfile,'rb'))
+        mismatch     += mismatch0
+        total_known  += total_known0
+        total_called += total_called0
+        snv_mismatch += snv_mismatch0
+        snv_match    += snv_match0
+
+        if cutoff == None:
+            cutoff = cutoff0
+
+    #description = '''POSTERIOR CUTOFF is the cutoff used for the posterior probability
+    #of a positions genotype as computed by sissorhands tool.
+    #CALLS ABOVE CUTOFF refers to the total number of
+    #positions (ref or variant) called using sissorhands base caller above the cutoff.
+    #HAVE TRUTH is the number of positions (including ref calls) above the cutoff that overlap the truth dataset
+    #we are comparing against (combination of PGP1 WGS data and CGI data)
+    #MISMATCH refers to positions that had known SNPs in our truth dataset and
+    #sissorhands called an allele that did not match a known allele (i.e. one allele of
+    #a heterozygous or the single allele of a homozygous. For positions seen as a single
+    #allele variant in CGI data the reference was also considered valid). The ERROR RATE is
+    #the fraction of these two values, MISMATCH/(HAVE TRUTH)
+
+    #The SNV MATCH counts positions where sissorhands called an snv in some chamber
+    #and it is a known SNV (in truth dataset). SNV MISMATCH counts those that are not known SNVs.
+    #The SNV FDR is the SNP false discovery rate, snv_mismatch / (snv_mismatch + snv_match)
+    #'''
+
+    description = '''POSTERIOR CUTOFF is the cutoff used for the posterior probability
+    that an allele is present as computed by sissorhands tool.
+    CALLS ABOVE CUTOFF refers to the total number of
+    positions (ref or variant) called using sissorhands base caller above the cutoff.
+    HAVE TRUTH is the number of positions (including ref calls) above the cutoff that overlap the truth dataset
+    we are comparing against (PGP1 CGI data)
+    MISMATCH refers to positions that had known SNPs in our truth dataset and
+    sissorhands called an allele that did not match a known allele (i.e. one allele of
+    a heterozygous or the single allele of a homozygous. For positions seen as a single
+    allele variant in CGI data the reference was also considered valid). The ERROR RATE is
+    the fraction of these two values, MISMATCH/(HAVE TRUTH)
+
+    The SNV MATCH counts positions where sissorhands called an snv in some chamber
+    and it is a known SNV (in truth dataset). SNV MISMATCH counts those that are not known SNVs.
+    The SNV FDR is the SNP false discovery rate, snv_mismatch / (snv_mismatch + snv_match)
+    '''
 
 
-                # we've processed a position so move both files ahead one
-                ccf_chrom, ccf_pos, ccf_alleles, ref_allele  = read_ccf_line()
-                gff_chrom, gff_pos, gff_alleles, ref_allele2 = read_gff_line()
-
-
-        print("MATCH:    {}".format(match),file=rof)
-        print("MISMATCH: {}".format(mismatch),file=rof)
-
-
-chamber_allele_call_accuracy('test_accuracy_parse.ccf', 'test_accuracy_parse.gff', 0.99, 'rof', 'mof')
+    with open(result_outfile,'w') as rof:
+        print("POSTERIOR CUTOFF:   {}".format(cutoff),file=rof)
+        print("CALLS ABOVE CUTOFF: {}".format(total_called),file=rof)
+        print("---------------------------",file=rof)
+        print("HAVE TRUTH:         {}".format(total_known),file=rof)
+        print("MISMATCH:           {}".format(mismatch),file=rof)
+        print("ERROR RATE:         {}".format(mismatch / total_known),file=rof)
+        print("---------------------------",file=rof)
+        print("SNV MATCH:          {}".format(snv_match),file=rof)
+        print("SNV MISMATCH:       {}".format(snv_mismatch),file=rof)
+        print("SNV FDR:            {}".format(snv_mismatch / (snv_mismatch + snv_match)),file=rof)
+        print("---------------------------",file=rof)
+        print(description)
