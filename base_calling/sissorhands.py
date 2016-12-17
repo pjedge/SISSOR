@@ -1,14 +1,16 @@
+from __future__ import print_function
 import argparse
 import itertools
 
 from math import log10
-from pdb import set_trace
-if False:
-    set_trace() # to dodge warnings that pdb isn't being used.
+#from pdb import set_trace
+#if False:
+#    set_trace() # to dodge warnings that pdb isn't being used.
 import time
 import re
 import pickle
 from collections import defaultdict
+
 
 #from numpy import logaddexp as addlogs
 
@@ -25,7 +27,7 @@ desc = 'Use cross-chamber information to call chamber alleles in SISSOR data'
 ###############################################################################
 
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
-coverage_cut = 2 # less than this many reads in a chamber are ignored
+coverage_cut = 3 # less than this many reads in a chamber are ignored
 max_cov = 100
 min_nonref = 3
 chroms = ['chr{}'.format(i) for i in range(1,23)] + ['chrX','chrY']
@@ -49,9 +51,8 @@ for i,chrom in enumerate(chroms):
 # DEFAULTS...
 ###############################################################################
 
-default_input_file = 'pileup_example.txt'#'test_subsample.txt'
+default_input_file = 'big_pileup.txt'#'pileup_example.txt'#'test_subsample.txt'
 default_output_file =  'output.txt'#'test_subsample.output'
-BASIC = True
 
 default_fragment_boundaries = None
 #default_fragment_boundaries = []
@@ -98,8 +99,14 @@ MDA_ERR = 1e-5 # the probability of consensus error due to MDA
 MDA_COR = log10(1 - MDA_ERR)
 MDA_ERR = log10(MDA_ERR) - log10(3) # the log probability of an MDA error, divided by 3
 
-INTRACELL_HAP_PENALTY = log10(1e-10) # intra-cell penalty for assigning chambers of different haps to same haps
-INTERCELL_HAP_PENALTY = log10(1e-10) # inter-cell penalty for assigning chambers of different haps to same haps
+cov_frac_limit = 15
+
+#INTRACELL_HAP_PENALTY = log10(1e-10) # intra-cell penalty for assigning chambers of different haps to same haps
+#INTERCELL_HAP_PENALTY = log10(1e-10) # inter-cell penalty for assigning chambers of different haps to same haps
+
+# cov_frac_dist numbers are goofy at lower coverage so just make them uniform
+#for i in range(1,15):
+#    cov_frac_dist[i] = [1/i]*i
 
 # INPUT
 # G: a tuple that specifies genotype e.g. ('A','T')
@@ -274,7 +281,7 @@ def pr_one_chamber_data(alleles_present, base_data, qual_data, fast_mode):
 
     elif len(alleles_present) == 2:
 
-        if fast_mode:
+        if fast_mode or n < cov_frac_limit:
             for base,qual in zip(base_data, qual_data):
                 p += two_allele_cache[(0.5, qual, (alleles_present[0] == base), (alleles_present[1] == base))]
         else:
@@ -849,13 +856,12 @@ def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only
 
             processed += 1
 
-
 if __name__ == '__main__':
     t1 = time.time()
     args = parseargs()
     n_cells = args.num_cells
 
-    call_chamber_alleles(args.input_file, args.output_file, args.fragment_boundaries, SNPs_only=False, no_cross_chamber_info=False)
+    call_chamber_alleles(args.input_file, args.output_file, args.fragment_boundaries, SNPs_only=False)
     t2 = time.time()
 
     print("TOTAL TIME: {} s".format(int(t2-t1)))
