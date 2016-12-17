@@ -20,7 +20,7 @@ def chamber_allele_call_accuracy(chamber_call_file, GFF_file, cutoff, result_out
             ccf_line  = ccf.readline()
             if not ccf_line or len(ccf_line) < 3:
                 return None,None,None,None
-                
+
             ccf_line = ccf_line.strip().split('\t')
             ccf_chrom = ccf_line[0]
             ccf_pos   = int(ccf_line[1])
@@ -49,16 +49,17 @@ def chamber_allele_call_accuracy(chamber_call_file, GFF_file, cutoff, result_out
             return ccf_chrom, ccf_pos, alleles, ref_allele
 
         def read_gff_line():
-            gff_line  = gff.readline()
-            if not gff_line:
-                return None,None,None,None
-            elif gff_line[0] == '#': # header line
-                return read_gff_line()
-            gff_line = gff_line.strip().split('\t')
+            gff_line  = ['#',0,0,0]
+            while gff_line[0][0] == '#' or gff_line[2] != 'SNP':
+                gff_line  = gff.readline()
+                if not gff_line:
+                    return None,None,None,None
+                gff_line = gff_line.strip().split('\t')
+
             gff_chrom = gff_line[0]
             gff_pos   = int(gff_line[3])
-            if(gff_pos != int(gff_line[4])):
-                return read_gff_line()
+
+            assert(gff_pos == int(gff_line[4]))
 
             info = gff_line[8].strip().split(';')
             a_info = info[0]
@@ -81,13 +82,13 @@ def chamber_allele_call_accuracy(chamber_call_file, GFF_file, cutoff, result_out
 
         match = 0
         mismatch = 0
-            
+
         i = 0
         ccf_chrom = None
         gff_chrom = None
         ref_allele = None
         while i < len(chroms):
-            
+
             chrom = chroms[i]
 
             while ccf_chrom != chrom:
@@ -97,44 +98,48 @@ def chamber_allele_call_accuracy(chamber_call_file, GFF_file, cutoff, result_out
             while gff_chrom != chrom:
                 gff_chrom, gff_pos, gff_alleles, ref_allele2 = read_gff_line()
                 if not gff_chrom:
-                    break                
+                    break
             # leave these out for now
             if chrom == 'chrX' or chrom == 'chrY':
                 i += 1
                 continue
             # in this loop, both files are considering positions of same chromosome
             while True:
-    
-                while ccf_chrom == chrom and ccf_pos < gff_pos:
-                    ccf_chrom, ccf_pos, ccf_alleles, ref_allele = read_ccf_line()
-                while gff_chrom == chrom and gff_pos < ccf_pos:
-                    gff_chrom, gff_pos, gff_alleles, ref_allele2 = read_gff_line()
-                                
+
+                while ccf_chrom == chrom and gff_chrom == chrom and ccf_pos != gff_pos:
+                    if ccf_pos < gff_pos:
+                        ccf_chrom, ccf_pos, ccf_alleles, ref_allele = read_ccf_line()
+                    elif gff_pos < ccf_pos:
+                        gff_chrom, gff_pos, gff_alleles, ref_allele2 = read_gff_line()
+
                 if gff_chrom != chrom or ccf_chrom != chrom:
                     i += 1
                     break
-                
+
                 assert(ccf_chrom == gff_chrom)
                 assert(ccf_pos   == gff_pos)
-                
+
                 # do stuff with data lines
-                
+
                 for allele in ccf_alleles:
-                    
+
                     if allele <= gff_alleles:
-                        
+
                         match += 1
-                    
+
                     else:
-                        
+
                         mismatch += 1
                         print("{}\t{}\t{}\t{}\t{}".format(ccf_chrom,ccf_pos,''.join(allele),''.join(gff_alleles), ref_allele),file=mof)
-                
-                
+
+
                 # we've processed a position so move both files ahead one
                 ccf_chrom, ccf_pos, ccf_alleles, ref_allele  = read_ccf_line()
                 gff_chrom, gff_pos, gff_alleles, ref_allele2 = read_gff_line()
-        
-        
+
+
         print("MATCH:    {}".format(match),file=rof)
         print("MISMATCH: {}".format(mismatch),file=rof)
+
+
+chamber_allele_call_accuracy('test_accuracy_parse.ccf', 'test_accuracy_parse.gff', 0.99, 'rof', 'mof')
