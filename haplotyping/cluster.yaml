@@ -6,7 +6,7 @@ __default__:
     qsub_stdout_dir: sissor_project/stdout
     job_name:        snakemake_job
     ppn:             2
-    walltime:        '30:00:00'
+    walltime:        '5:00:00' #'30:00:00'
 
 prune_haplotype:
     ppn: 1
@@ -18,7 +18,7 @@ calculate_error_rates:
 
 run_hapcut2:
     ppn: 1
-    walltime: '20:00:00'
+    walltime: '5:00:00' #'20:00:00'
 
 merge_fragmat:
     ppn: 1
@@ -34,8 +34,14 @@ make_fixed_beds:
 
 create_augmented_fragmat:
     ppn: 2
-    walltime: '30:00:00'
+    walltime: 30:00:00'
 
 sample_jobs:
     ppn:      2
     walltime: '10:00:00'
+
+combine_filtered:
+    walltime: '1:00:00'
+
+filter_CCF:
+    walltime: '1:00:00'
