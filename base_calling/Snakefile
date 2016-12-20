@@ -178,21 +178,23 @@ rule call_alleles:
 
 rule estimate_parameters:
     params: job_name = 'estimate_parameters'
-    input:  expand('parameters/split/chrX_covs.{r}.p',r=regions),
+    input:  expand('parameters/split/chrX_MDA_fracs.{r}.p',r=regions),
+            expand('parameters/split/chrX_covs.{r}.p',r=regions),
             expand('parameters/split/chamber_position_counts.{r}.p',r=regions),
             expand('parameters/split/strand_coverage_counts.{r}.p',r=regions),
-            expand('parameters/split/total_sampled_cell_positions.{r}.p',r=regions),
-    output: 'parameters/chrX_covs.p',
+            #expand('parameters/split/total_sampled_cell_positions.{r}.p',r=regions),
+    output: 'parameters/MDA_dist.p',
+            'parameters/chrX_covs.p',
             'parameters/chamber_position_counts.p',
             'parameters/strand_coverage_counts.p',
-            'parameters/total_sampled_cell_positions.p',
             'parameters/cov_frac_dist.p',
             'parameters/p_null.p',
             'parameters/ch_priors.p',
             'parameters/hom_config_probs.p',
             'parameters/het_config_probs.p',
             'parameters/genotype_priors.p',
-            'parameters/omega.p'
+            #'parameters/total_sampled_cell_positions.p',
+            #'parameters/omega.p'
     run:
         estimate_parameters.estimate_parameters(regions,grams_DNA_before_MDA,grams_DNA_after_MDA)
 
@@ -200,10 +202,11 @@ rule obtain_counts_parallel:
     params: job_name = 'obtain_counts_parallel.{r}'
     input:  pileup = 'pileups/split/{r}.pileup',
             #boundary_files = expand('fragment_boundary_beds/{ce}/ch{ch}.bed',ce=cells,ch=chambers)
-    output: 'parameters/split/chrX_covs.{r}.p',
+    output: 'parameters/split/chrX_MDA_fracs.{r}.p',
+            'parameters/split/chrX_covs.{r}.p',
             'parameters/split/chamber_position_counts.{r}.p',
             'parameters/split/strand_coverage_counts.{r}.p',
-            'parameters/split/total_sampled_cell_positions.{r}.p',
+            #'parameters/split/total_sampled_cell_positions.{r}.p',
     run:
         estimate_parameters.obtain_counts_parallel(input.pileup, input.boundary_files=None, wildcards.r)
 

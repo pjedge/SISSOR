@@ -92,14 +92,17 @@ cov_frac_dist = pickle.load(open( "parameters/cov_frac_dist.p", "rb")) # PROBABI
 hom_config_probs = pickle.load(open( "parameters/hom_config_probs.p", "rb")) # STRAND-TO-CHAMBER CONFIGURATIONS
 het_config_probs = pickle.load(open( "parameters/het_config_probs.p", "rb"))
 genotype_priors = pickle.load(open( "parameters/genotype_priors.p", "rb"))
-omega = pickle.load(open( "parameters/omega.p", "rb")) # per-base probability of MDA error
-omega_nolog = 10**omega
+#omega = pickle.load(open( "parameters/omega.p", "rb")) # per-base probability of MDA error
+#omega_nolog = 10**omega
 
 MDA_ERR = 1e-5 # the probability of consensus error due to MDA
 MDA_COR = log10(1 - MDA_ERR)
 MDA_ERR = log10(MDA_ERR) - log10(3) # the log probability of an MDA error, divided by 3
 
 cov_frac_limit = 15
+
+NUM_BINS = 20
+COV_INTERVAL = 10
 
 #INTRACELL_HAP_PENALTY = log10(1e-10) # intra-cell penalty for assigning chambers of different haps to same haps
 #INTERCELL_HAP_PENALTY = log10(1e-10) # inter-cell penalty for assigning chambers of different haps to same haps
@@ -243,26 +246,30 @@ def compute_mixed_allele_priors():
 one_allele_cache = dict()
 two_allele_cache = dict()
 def compute_caches():
-    for i in range(0,31):
-        for j in range(i+1,31):
+    for i in range(0,NUM_BINS+1):
+        for j in range(i+1,NUM_BINS+1):
             for q in range(33,130):
                 for a1_match in [False,True]:
                     for a2_match in [False,True]:
                         qual = 10**((q - 33) * -0.1)
                         frac = i / j if i > 1 else 1e-10
 
-                        x1 = (1.0-qual)*(1.0-omega_nolog) + omega_nolog*qual
-                        x2 = omega_nolog*(1.0-qual) + (1-omega_nolog)*qual
+                        #x1 = (1.0-qual)*(1.0-omega_nolog) + omega_nolog*qual
+                        #x2 = omega_nolog*(1.0-qual) + (1-omega_nolog)*qual
+                        #p1 = x1 if a1_match else x2
+                        #p2 = x1 if a2_match else x2
+                        #two_allele_cache[((i / j),qual,a1_match,a2_match)] = log10(frac*p1 + (1-frac)*p2)
+                        x1 = 1.0-qual
+                        x2 = qual
                         p1 = x1 if a1_match else x2
                         p2 = x1 if a2_match else x2
-                        two_allele_cache[((i / j),qual,a1_match,a2_match)] = log10(frac*p1 + (1-frac)*p2)
-
+                        two_allele_cache[((i / j),qual,a1_match,a2_match)] log10(frac*p1 + (1-frac)*p2)
 
     for q in range(33,130):
         qual = 10**((q - 33) * -0.1)
 
-        one_allele_cache[(qual,True)] = log10((1.0-qual)*(1.0-omega_nolog) + omega_nolog*qual)
-        one_allele_cache[(qual,False)] = log10(omega_nolog*(1.0-qual) + (1-omega_nolog)*qual)
+        one_allele_cache[(qual,True)]  = log10(1.0-qual)   #log10((1.0-qual)*(1.0-omega_nolog) + omega_nolog*qual)
+        one_allele_cache[(qual,False)] = log10(qual)       #log10(omega_nolog*(1.0-qual) + (1-omega_nolog)*qual)
 
 compute_caches()
 
@@ -273,22 +280,46 @@ def pr_one_chamber_data(alleles_present, base_data, qual_data, fast_mode):
     assert(n == len(qual_data))
     p = 0
 
+    # note that to save computation we don't allow both MDA error "mixture" and
+    # strand mixture at the same time.
+    # this would be really slow and messy without too much added benefit
+
+    # if we are considering that a single strand has fallen in the chamber
     if len(alleles_present) == 1:
 
-        for base,qual in zip(base_data, qual_data):
+        p = tinylog
 
-            p += one_allele_cache[(qual, (alleles_present[0] == base))]
+        L = len(MDA_error_dist[n])
+        for i, p_frac in enumerate(MDA_error_dist[n]): # MDA_error_dist[0] has MDA error distribution for 1..10, MDA_error_dist[1] has MDA error distribution for 11..20
+            p_frac = log10(p_frac) if p_frac > 0 else None
+            if p_frac == None:
+                continue
+            frac = i / L
 
+            for MDA_allele in bases:
+                if MDA_allele == alleles_present[0]: # can't have main and secondary allele be the same...
+                    continue
+                p0 = p_frac - 3 # 3 possible bases to have an MDA error to
+                for base,qual in zip(base_data, qual_data): # sum over all base/quals in pileup
+                    p0 += two_allele_cache[(frac, qual, (MDA_allele == base), (alleles_present[0] == base))]
+
+                p = addlogs(p, p0)
+
+    # if we are considering that two strands have fallen in the chamber
     elif len(alleles_present) == 2:
 
+        # if fast mode (mostly reference bases) we use faster computation, assuming basically binomial
         if fast_mode or n < cov_frac_limit:
             for base,qual in zip(base_data, qual_data):
                 p += two_allele_cache[(0.5, qual, (alleles_present[0] == base), (alleles_present[1] == base))]
+        # we've observed a lot of non-reference bases. slower computation which sums over entire strand mixture probability distribution
         else:
-            p = -1e10
+            p = tinylog
             L = len(cov_frac_dist[n])
             for i, p0 in enumerate(cov_frac_dist[n]):
-                p0 = log10(p0) if p0 > 0 else tinylog
+                p0 = log10(p0) if p0 > 0 else None
+                if p0 == None:
+                    continue
                 frac = i / L
                 for base,qual in zip(base_data, qual_data):
                     p0 += two_allele_cache[(frac, qual, (alleles_present[0] == base), (alleles_present[1] == base))]
@@ -415,7 +446,9 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
                         allele2 = alleles_present[1]
 
                         p0 = tinylog
-                        #prob_tot = tinylog
+
+                        # we must account for the fact that the entire consensus may
+                        # be wrong due to MDA error
                         for base1, base2 in genotypes:
 
                             x1 = MDA_COR if base1 == allele1 else MDA_ERR
@@ -425,18 +458,12 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
                                 p1 = pr_one_ch[(i,j,(base1,base2))] + MDA_COR + MDA_COR
                                 p2 = pr_one_ch[(i,j,(base1,base2))] + MDA_ERR + MDA_ERR
                                 p1 = addlogs(p1,p2)
-                                #prob_tot = addlogs(prob_tot, x1+x2)
-                                #prob_tot = addlogs(prob_tot, MDA_ERR)
                             elif base1 == base2:
                                 p1 = pr_one_ch[(i,j,(base1,))] + x1 + x2
-                                #prob_tot = addlogs(prob_tot, x1+x2)
                             else:
                                 p1 = pr_one_ch[(i,j,(base1,base2))] + x1 + x2 + log10(2)
-                                #prob_tot = addlogs(prob_tot, x1+x2+log10(2))
 
                             p0 = addlogs(p0, p1)
-
-                        #assert(abs(1 - 10**prob_tot) < 0.001)
 
                         p += p0
 
@@ -451,49 +478,49 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
 
             config_same_hap = set()
             config_diff_hap = set()
-                        
+
             for cell_a in range(0,n_cells):
                 cell_a_chambers, p_cell_a_cfg = config[cell_a]
-                
+
                 for cell_b in range(0,n_cells):
                     cell_b_chambers, p_cell_a_cfg = config[cell_a]
-                    
+
                     for y1,x1 in enumerate(cell_a_chambers):
                         for y2,x2 in enumerate(cell_b_chambers):
-                            
+
                             if x1 == n_chambers or x2 == n_chambers: # assignments to null chamber (not sampled)
                                 continue
-                                                        
+
                             if cell_a == cell_b and y1 == y2:
-                                continue 
-                            
+                                continue
+
                             if (y1 < 2 and y2 < 2) or (y1 >= 2 and y2 >= 2):
                                 config_same_hap.add(((cell_a,x1),(cell_b,x2))) # says "configuration places these cells/chambers in the same haplotype"
                             else:
                                 config_diff_hap.add(((cell_a,x1),(cell_b,x2)))# says "configuration places these cells/chambers in different haplotype"
-                          
-            
+
+
             for pair in known_same_hap:
                 if pair in config_diff_hap: #not in config_same_hap:
-                    if pair[0][0] == pair[1][0]: # same cell                    
+                    if pair[0][0] == pair[1][0]: # same cell
                         p += -1000#INTRACELL_HAP_PENALTY
                     else: # different cell
                         p += -1000#INTERCELL_HAP_PENALTY
-                          
+
             for pair in known_diff_hap:
                 if pair not in config_diff_hap:
-                    if pair[0][0] == pair[1][0]: # same cell                   
+                    if pair[0][0] == pair[1][0]: # same cell
                         p += -1000#INTRACELL_HAP_PENALTY
                     else: # different cell
                         p += -1000#INTERCELL_HAP_PENALTY
-            
+
             #print(config_same_hap)
             #print(config_diff_hap)
             '''
             ###################################################################
 
             p_total = addlogs(p_total, p) # update genotype likelihood sum
-            
+
             for assignment in assignments:
                 p_assignment[assignment] = addlogs(p_assignment[assignment], p + genotype_priors[ref_allele][G])
 
@@ -503,7 +530,7 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
     total = tinylog
     for G,p in probs.items():
         total = addlogs(total,p)
-        
+
     res = []
     SNP = False
     max_posterior = -1
@@ -524,15 +551,15 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
 
     if max_G != (ref_allele,ref_allele):
         SNP = True
-    
+
     res2 = [(allele,10**(allele_count[allele] - total)) for allele in bases]
 
     allele_str = ';'.join(['{}:{}'.format(a,p) for a,p in res2])
     gen_str = ';'.join(['{}:{}'.format(''.join(g),p) for g,p in res])
     outline_el[0] = allele_str
     outline_el[1] = gen_str
-    
-    
+
+
 
     for cell in range(0,n_cells):  # for each cell
         for chamber in nonzero_chambers[cell]:
@@ -566,7 +593,7 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
             out_str = ';'.join(['{}:{}'.format(''.join(a),p) for a,p in res])
 
             outline_el[3 + cell + cell*n_chambers + chamber] = out_str
-            
+
 
     # "Basic" base calling, no cross-chamber info
 
@@ -734,7 +761,7 @@ def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only
                     if boundary_files != None:
                         if fragment_boundaries[cell_num][ch_num] == []:
                             continue
-                    
+
                         f_chrom, f_start, f_end = fragment_boundaries[cell_num][ch_num][0]
 
                         # if we're behind fragment start, skip this spot
@@ -750,7 +777,7 @@ def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only
                                 fragment_boundaries[cell_num][ch_num].pop(0)
                             else:
                                 break
-    
+
                         # if we're not inside fragment, continue
                         if not(chrom == f_chrom and pos >= f_start and pos < f_end):
                             continue

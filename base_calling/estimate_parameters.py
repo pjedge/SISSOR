@@ -16,6 +16,7 @@ from pdb import set_trace
 from collections import defaultdict
 import random
 import bisect
+import sissorhands
 import math
 if False:
     set_trace() # to dodge warnings that pdb isn't being used.
@@ -37,6 +38,9 @@ genotypes = list(itertools.combinations_with_replacement(bases,2))
 het_snp_rate = 0.0005
 hom_snp_rate = 0.001
 n_cells = 3
+max_cov = 100
+NUM_BINS = 20
+COV_INTERVAL = 10
 chr_num = dict()
 for i,chrom in enumerate(chroms):
     chr_num[chrom] = i
@@ -94,18 +98,24 @@ def weighted_choice_bisect_compile(items):
 
 def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
 
+    chrX_MDA_fracs = defaultdict(lambda: [0.0]*NUM_BINS)
     chrX_covs = defaultdict(int)
     chamber_position_counts = defaultdict(int)
     strand_coverage_counts = defaultdict(int)
-    total_sampled_cell_positions = 0
+    #total_sampled_cell_positions = 0
 
     for suffix in suffixes:
 
-        # LOAD PICKLE FILES
+        # LOAD PICKLE FILES chrX_MDA_fracs
+        partial_chrX_MDA_fracs = pickle.load(open("parameters/split/chrX_MDA_fracs.{}.p".format(suffix), "rb" ))
         partial_chrX_covs = pickle.load(open("parameters/split/chrX_covs.{}.p".format(suffix), "rb" ))
         partial_chamber_position_counts = pickle.load(open("parameters/split/chamber_position_counts.{}.p".format(suffix), "rb" ))
         partial_strand_coverage_counts = pickle.load(open("parameters/split/strand_coverage_counts.{}.p".format(suffix), "rb" ))
-        partial_total_sampled_cell_positions = pickle.load(open("parameters/split/total_sampled_cell_positions.{}.p".format(suffix), "rb" ))
+        #partial_total_sampled_cell_positions = pickle.load(open("parameters/split/total_sampled_cell_positions.{}.p".format(suffix), "rb" ))
+
+        for k,counts in partial_chrX_MDA_fracs.items():
+            for i,count in enumerate(counts):
+                chrX_MDA_fracs[k][i] += count
 
         for k,v in partial_chrX_covs.items():
             chrX_covs[k] += v
@@ -116,8 +126,13 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
         for k,v in partial_strand_coverage_counts.items():
             strand_coverage_counts[k] += v
 
-        total_sampled_cell_positions += partial_total_sampled_cell_positions
+        #total_sampled_cell_positions += partial_total_sampled_cell_positions
 
+
+    MDA_dist = dict()
+    for k in chrX_MDA_fracs.keys():
+        total = sum(chrX_MDA_fracs[k])
+        MDA_dist[k] = [c / total for c in chrX_MDA_fracs[k]]
 
     chrX_covs_tuple = list(chrX_covs.items())
     total = sum([b for a,b in chrX_covs_tuple])
@@ -143,8 +158,7 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
             cov_frac_dist_raw[cov].append(count/sum(cov_frac_dist_raw_counts[cov]))
         assert(len(cov_frac_dist_raw[cov]) == cov)
 
-    lim = 30
-    for i in range(1,lim+1):
+    for i in range(1,NUM_BINS+1):
         cov_frac_dist[i] = cov_frac_dist_raw[i]
 
     def chunks(l, n): # credit to http://stackoverflow.com/questions/312443/how-do-you-split-a-list-into-evenly-sized-chunks
@@ -158,17 +172,17 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
 
 
     last_lst = []
-    for i in range(lim,2000,lim):
-        binsize = int(i / lim)
+    for i in range(COV_INTERVAL,max_cov,COV_INTERVAL):
+        binsize = int(i / NUM_BINS)
         lst = condense(cov_frac_dist_raw[i], binsize)
         if lst == []:
             lst = last_lst
-        for j in range(i,i+lim):
+        for j in range(i,i+NUM_BINS):
             cov_frac_dist[j] = lst
         last_lst = lst
 
-    for i in range(lim,2000):
-        assert(len(cov_frac_dist[i]) == lim)
+    for i in range(NUM_BINS,2000):
+        assert(len(cov_frac_dist[i]) == NUM_BINS)
 
     total_position_counts = sum([chamber_position_counts[chamber] for chamber in range(0,24)])
     chamber_proportions = [chamber_position_counts[chamber]/total_position_counts for chamber in range(0,24)]
@@ -329,14 +343,16 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
 
     # ESTIMATE PER-BASE PROBABILITY OF MDA ERROR
     # formula from this paper: http://journals.plos.org/plosone/article?id=10.1371/journal.pone.0105585
+
     GAIN = grams_DNA_after_MDA / grams_DNA_before_MDA
     omega = log10(3.2e-6 / 2 * math.log2(GAIN)) # probability of MDA error.
 
    # WRITE PARAMETERS TO PICKLE FILES
+    pickle.dump(MDA_dist, open("parameters/MDA_dist.p", "wb"))
     pickle.dump(chrX_covs, open("parameters/chrX_covs.p", "wb"))
     pickle.dump(chamber_position_counts, open("parameters/chamber_position_counts.p","wb"))
     pickle.dump(strand_coverage_counts, open("parameters/strand_coverage_counts.p","wb"))
-    pickle.dump(total_sampled_cell_positions, open("parameters/total_sampled_cell_positions.p","wb"))
+    #pickle.dump(total_sampled_cell_positions, open("parameters/total_sampled_cell_positions.p","wb"))
     pickle.dump(cov_frac_dist, open("parameters/cov_frac_dist.p","wb"))
     pickle.dump(p_null, open("parameters/p_null.p", "wb"))
     pickle.dump(ch_priors, open("parameters/ch_priors.p","wb"))
@@ -347,8 +363,8 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
 
 def obtain_counts_parallel(input_file, boundary_files=None, suffix=''):
 
-    coverage_cut = 3
-    
+    coverage_cut = 2
+
     if boundary_files != None:
         fragment_boundaries = [[] for i in range(n_cells)]
         for cell in range(0,n_cells):  # for each cell
@@ -356,10 +372,11 @@ def obtain_counts_parallel(input_file, boundary_files=None, suffix=''):
                 bfile = boundary_files[cell*n_chambers + chamber]
                 fragment_boundaries[cell].append(parse_bedfile(bfile))
 
+    chrX_MDA_fracs = defaultdict(lambda: [0.0]*NUM_BINS)
     chrX_covs = defaultdict(int)
     chamber_position_counts = defaultdict(int)
     strand_coverage_counts = defaultdict(int)
-    total_sampled_cell_positions = 0
+    #total_sampled_cell_positions = 0
 
     with open(input_file,'r') as ipf:
         for line in ipf:
@@ -378,19 +395,19 @@ def obtain_counts_parallel(input_file, boundary_files=None, suffix=''):
 
             for cell_num in range(n_cells):
                 for ch_num in range(n_chambers):
-                    
+
                     if boundary_files != None:
 
                         # ensure that position falls inside a called fragment
                         if fragment_boundaries[cell_num][ch_num] == []:
                             continue
-    
+
                         f_chrom, f_start, f_end = fragment_boundaries[cell_num][ch_num][0]
-    
+
                         # if we're behind fragment start, skip this spot
                         if chr_num[chrom] < chr_num[f_chrom] or (chrom == f_chrom and pos < f_start):
                             continue
-    
+
                         # if we're ahead of fragment start, skip to later fragment boundaries
                         while 1:
                             if fragment_boundaries[cell_num][ch_num] == []:
@@ -400,7 +417,7 @@ def obtain_counts_parallel(input_file, boundary_files=None, suffix=''):
                                 fragment_boundaries[cell_num][ch_num].pop(0)
                             else:
                                 break
-    
+
                         # if we're not inside fragment, continue
                         if not(chrom == f_chrom and pos >= f_start and pos < f_end):
                             continue
@@ -414,13 +431,45 @@ def obtain_counts_parallel(input_file, boundary_files=None, suffix=''):
 
                     if chrom == 'chrX':
                         chrX_covs[depth] += 1
+
+                        raw_bd = el[col_ix + 1]
+                        raw_qd = el[col_ix + 2]
+
+                        bd, qd, ic = sissorhands.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+                        bd = bd[:max_cov]
+                        qd = qd[:max_cov]
+
+                        if len(bd) < coverage_cut:
+                            continue
+
+                        nonzero_chambers[cell_num].append(ch_num)
+                        nonzero_chamber_count += 1
+
+                        base_count = {'A':0,'G':0,'T':0,'C':0}
+                        for b in bd:
+                            base_count[b] += 1
+                            if b != ref_base:
+                                total_nonref += 1
+
+                        base_count = sorted(list(base_count.items()),key=lambda x: x[1],reverse=True)
+                        maj = base_count[0][1]
+                        sec = base_count[1][1]
+
+                        depth2 = maj + sec
+                        mda_ix = int(depth2 / COV_INTERVAL) # separate distributions for coverage 1..10, 11..20, 21..30
+                        frac = sec / depth2
+                        frac_bin = int(frac * NUM_BINS)
+                        if depth2 >= 5: # low values will probably skew the first bin
+                            chrX_MDA_fracs[mda_ix][frac_bin] += 1
+
                     elif chrom != 'chrY':
                         strand_counts[cell_num] += 1
                         chamber_position_counts[ch_num] += 1
 
             if chrom != 'chrX' and chrom != 'chrY':
+                #total_sampled_cell_positions += n_cells
                 for cell_num in range(n_cells):
-                    total_sampled_cell_positions += n_cells
+
                     strand_coverage_counts[strand_counts[cell_num]] += 1
 
     output_dir = 'parameters/split'
@@ -428,7 +477,8 @@ def obtain_counts_parallel(input_file, boundary_files=None, suffix=''):
         os.makedirs(output_dir)
 
     # WRITE PARAMETERS TO PICKLE FILES
+    pickle.dump(chrX_MDA_fracs, open( "parameters/split/chrX_MDA_fracs.{}.p".format(suffix), "wb" ))
     pickle.dump(chrX_covs, open( "parameters/split/chrX_covs.{}.p".format(suffix), "wb" ))
     pickle.dump(chamber_position_counts, open( "parameters/split/chamber_position_counts.{}.p".format(suffix), "wb" ))
     pickle.dump(strand_coverage_counts, open( "parameters/split/strand_coverage_counts.{}.p".format(suffix), "wb" ))
-    pickle.dump(total_sampled_cell_positions, open( "parameters/split/total_sampled_cell_positions.{}.p".format(suffix), "wb" ))
+    #pickle.dump(total_sampled_cell_positions, open( "parameters/split/total_sampled_cell_positions.{}.p".format(suffix), "wb" ))
