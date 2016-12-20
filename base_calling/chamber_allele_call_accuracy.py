@@ -31,7 +31,7 @@ def split_vcf(input_vcf, chunklist, output_vcfs):
             vcf_pos = int(vcf_line[1])
 
             if vcf_chrom != chrom or vcf_pos > stop:
-                
+
                 done = False
                 while not (vcf_chrom == chrom and vcf_pos >= start and vcf_pos <= stop):
                     output.close()
@@ -101,7 +101,7 @@ def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_
     truth_dict = dict()
     gms_set    = set()
     hg19_fasta = pysam.FastaFile(HG19)
-    
+
     # add heterozygous alleles observed in one CGI dataset to a dictionary
     with open(GFF_file,'r') as gff:
         for line in gff:
@@ -145,7 +145,7 @@ def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_
                     # add reference base because of this CGI dataset's base false negative rate
                     if len(alleles) == 1 and ref_allele != None:
                         truth_dict[(gff_chrom,gff_pos)] = truth_dict[(gff_chrom,gff_pos)].union({ref_allele})
-            
+
             elif gff_line[2] == 'REF':
 
                 gff_chrom   = gff_line[0]
@@ -166,7 +166,7 @@ def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_
                         truth_dict[(gff_chrom,gff_pos)] = truth_dict[(gff_chrom,gff_pos)].union({ref_lookup})
                     else:
                         truth_dict[(gff_chrom,gff_pos)] = {ref_lookup}
-            
+
 
     # add heterozygous SNVs observed in our second CGI dataset to the dictionary
     with open(CGI_VCF_file,'r') as vcf:
@@ -313,15 +313,15 @@ def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_
             '''
             ccf_alleles       = []
             has_allele_mix = False
-            
+
             base_call_list = [x for x in ccf_line[5:80] if 'CELL' not in x]
-            
+
             for call in base_call_list:
                 if call == '*':
                     continue
-                
-                xchamber_calls, basic_calls, pileup = call.split('|')      
-                
+
+                xchamber_calls, basic_calls, pileup = call.split('|')
+
                 el2 = xchamber_calls.split(';')
 
                 max_prob = -1
@@ -371,7 +371,7 @@ def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_
                     el[-1] = tag
                 else:
                     el[-1] = '{};{}'.format(el[-1], tag)
-                                    
+
                 print('\t'.join(el),file=mof)
 
             elif allele != {ref_allele} and alleles <= truth_dict[(ccf_chrom,ccf_pos)]:
