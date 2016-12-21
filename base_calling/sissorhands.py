@@ -10,7 +10,7 @@ import time
 import re
 import pickle
 from collections import defaultdict
-
+import common
 
 #from numpy import logaddexp as addlogs
 
@@ -263,12 +263,13 @@ def compute_caches():
                         x2 = qual
                         p1 = x1 if a1_match else x2
                         p2 = x1 if a2_match else x2
-                        two_allele_cache[((i / j),qual,a1_match,a2_match)] log10(frac*p1 + (1-frac)*p2)
+                        p3 = frac*p1 + (1-frac)*p2
+                        two_allele_cache[((i / j),qual,a1_match,a2_match)] = log10(p3) if p3 > 0 else tinylog
 
     for q in range(33,130):
         qual = 10**((q - 33) * -0.1)
 
-        one_allele_cache[(qual,True)]  = log10(1.0-qual)   #log10((1.0-qual)*(1.0-omega_nolog) + omega_nolog*qual)
+        one_allele_cache[(qual,True)]  = log10(1.0-qual) if 1.0-qual > 0 else tinylog   #log10((1.0-qual)*(1.0-omega_nolog) + omega_nolog*qual)
         one_allele_cache[(qual,False)] = log10(qual)       #log10(omega_nolog*(1.0-qual) + (1-omega_nolog)*qual)
 
 compute_caches()
@@ -632,74 +633,6 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
 # MAIN FUNCTION AND PARSING
 ###############################################################################
 
-caret_money = re.compile(r'\^.|\$')
-comma_or_period = re.compile(r'\.|\,')
-plus_or_minus = re.compile(r'\+|-')
-
-def parse_mpileup_base_qual(raw_bd, raw_qd, ref_base):
-
-    bd = [] # base data
-    qd = [] # qual data
-
-    indel_count = len(re.findall(caret_money, raw_bd))
-
-    if not re.search(plus_or_minus,raw_bd):
-
-        bd = str.upper(re.sub(caret_money,'', raw_bd))
-        bd = re.sub(comma_or_period, ref_base, bd)
-        qd = [10**((ord(q) - 33) * -0.1) for q in raw_qd]
-        paired_bd_qd = [(b,q) for b,q in zip(bd,qd) if b not in ['>','<','*','n','N']]
-        if len(paired_bd_qd) < coverage_cut:
-            return [],[], 0
-
-        bd, qd = zip(*paired_bd_qd)
-        bd = list(bd)
-        qd = list(qd)
-
-    else:
-
-        i = 0   # index for base data
-        j = 0   # index for qual data
-
-        while i < len(raw_bd):
-            if raw_bd[i] == '.' or raw_bd[i] == ',':   # reference base call
-                bd.append(ref_base)
-                qd.append(10**((ord(raw_qd[j]) - 33) * -0.1))
-                i += 1
-                j += 1
-            elif raw_bd[i] in base_letters:            # variant call
-                bd.append(str.upper(raw_bd[i]))
-                qd.append(10**((ord(raw_qd[j]) - 33) * -0.1))
-                i += 1
-                j += 1
-            elif raw_bd[i] == '+' or raw_bd[i] == '-': # indel
-                indel_count += 1
-                num = int(raw_bd[i+1])
-                i += 2
-                while(raw_bd[i] in numbers):
-                    num *= 10
-                    num += int(raw_bd[i])
-                    i += 1
-                i += num
-            elif raw_bd[i] == '^':
-                i += 2
-            elif raw_bd[i] == '$':
-                i += 1
-            elif raw_bd[i] in '><*nN':                 # reference skip or deletion
-                i += 1
-                j += 1
-
-        assert(i == len(raw_bd))
-        assert(j == len(raw_qd))
-
-    assert(len(bd) == len(qd))
-
-    for b in bd:
-        assert(b in bases)
-
-    return bd, qd, indel_count
-
-
 def parse_bedfile(input_file):
 
     boundaries = []
@@ -793,7 +726,7 @@ def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only
                     raw_bd = el[col_ix + 1]
                     raw_qd = el[col_ix + 2]
 
-                    bd, qd, ic = parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+                    bd, qd, ic = common.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
 
                     indel_count += ic
 

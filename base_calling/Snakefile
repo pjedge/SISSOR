@@ -2,7 +2,7 @@ from collections import defaultdict
 import pickle
 import random
 import estimate_parameters
-#import fix_sam
+import fix_sam
 import chamber_allele_call_accuracy as caca
 import base_calls_to_vcf
 
@@ -58,7 +58,8 @@ rule all:
     input:
         #expand('het_vcfs/cutoff{cut}/whole_genome.vcf',cut=het_vcf_cutoffs)
         #'accuracy_reports/new/split/chr2.145000001.150000000/7/mismatches'
-        expand('accuracy_reports/new/cutoff{cut}.results',cut=cutoffs)
+        #expand('accuracy_reports/new/cutoff{cut}.results',cut=cutoffs)
+        'parameters/MDA_dist.p'
 
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
@@ -239,8 +240,8 @@ rule fix_sam:
         fix_sam.fix_sam(input.sam,output.bam)
 
 rule bam2sam:
-    params: job_name = 'bam2sam.{ce}.{ce}'
-    input:  'bams/{ce}/old.ch{ce}.bam'
+    params: job_name = 'bam2sam.{ce}.{ch}'
+    input:  'bams/{ce}/old.ch{ch}.bam'
     output: temp(rules.fix_sam.input)
     shell: '{SAMTOOLS} view -h {input} > {output}'
 

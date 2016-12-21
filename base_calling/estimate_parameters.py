@@ -16,8 +16,8 @@ from pdb import set_trace
 from collections import defaultdict
 import random
 import bisect
-import sissorhands
 import math
+import common
 if False:
     set_trace() # to dodge warnings that pdb isn't being used.
 
@@ -98,7 +98,7 @@ def weighted_choice_bisect_compile(items):
 
 def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
 
-    chrX_MDA_fracs = defaultdict(lambda: [0.0]*NUM_BINS)
+    chrX_MDA_fracs = dict()#defaultdict(lambda: )
     chrX_covs = defaultdict(int)
     chamber_position_counts = defaultdict(int)
     strand_coverage_counts = defaultdict(int)
@@ -115,7 +115,10 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
 
         for k,counts in partial_chrX_MDA_fracs.items():
             for i,count in enumerate(counts):
+                if k not in chrX_MDA_fracs:
+                    chrX_MDA_fracs[k] = [0.0]*NUM_BINS
                 chrX_MDA_fracs[k][i] += count
+
 
         for k,v in partial_chrX_covs.items():
             chrX_covs[k] += v
@@ -372,7 +375,7 @@ def obtain_counts_parallel(input_file, boundary_files=None, suffix=''):
                 bfile = boundary_files[cell*n_chambers + chamber]
                 fragment_boundaries[cell].append(parse_bedfile(bfile))
 
-    chrX_MDA_fracs = defaultdict(lambda: [0.0]*NUM_BINS)
+    chrX_MDA_fracs = dict()
     chrX_covs = defaultdict(int)
     chamber_position_counts = defaultdict(int)
     strand_coverage_counts = defaultdict(int)
@@ -435,7 +438,7 @@ def obtain_counts_parallel(input_file, boundary_files=None, suffix=''):
                         raw_bd = el[col_ix + 1]
                         raw_qd = el[col_ix + 2]
 
-                        bd, qd, ic = sissorhands.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+                        bd, qd, ic = common.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
                         bd = bd[:max_cov]
                         qd = qd[:max_cov]
 
@@ -460,6 +463,8 @@ def obtain_counts_parallel(input_file, boundary_files=None, suffix=''):
                         frac = sec / depth2
                         frac_bin = int(frac * NUM_BINS)
                         if depth2 >= 5: # low values will probably skew the first bin
+                            if mda_ix not in chrX_MDA_fracs:
+                                chrX_MDA_fracs[mda_ix] = [0]*NUM_BINS
                             chrX_MDA_fracs[mda_ix][frac_bin] += 1
 
                     elif chrom != 'chrY':
