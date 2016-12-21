@@ -199,7 +199,7 @@ rule estimate_parameters:
             #'parameters/omega.p'
     run:
         estimate_parameters.estimate_parameters(regions,grams_DNA_before_MDA,grams_DNA_after_MDA)
-'''
+
 rule obtain_counts_parallel:
     params: job_name = 'obtain_counts_parallel.{r}'
     input:  pileup = 'pileups/split/{r}.pileup',
@@ -243,7 +243,7 @@ rule bam2sam:
     input:  'bams/{ce}/old.ch{ch}.bam'
     output: temp(rules.fix_sam.input)
     shell: '{SAMTOOLS} view -h {input} > {output}'
-'''
+
 # simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
 rule simlinks:
     run:
