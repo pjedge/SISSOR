@@ -133,10 +133,21 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
 
 
     MDA_dist = dict()
+    #MDA dist is grouped by 0..10, 11,20, etc so we have to account for this
     for k in chrX_MDA_fracs.keys():
         total = sum(chrX_MDA_fracs[k])
-        MDA_dist[k] = [c / total for c in chrX_MDA_fracs[k]]
+        lst = [c / total for c in chrX_MDA_fracs[k]]
+        for j in range(k*10+1,(k+1)*10+1):
+            MDA_dist[j] = lst
+        
 
+    minval = min([a for a,b in chrX_covs.items()])
+    # we assume that coverages below the postion coverage cutoff have frequency
+    # equal to that just above the cutoff
+    # it'll be an underestimation but it should be ok
+    for i in range(0,minval):
+        chrX_covs[i] = chrX_covs[minval]
+            
     chrX_covs_tuple = list(chrX_covs.items())
     total = sum([b for a,b in chrX_covs_tuple])
     chrX_covs_probs = [(a,b/total) for a,b in chrX_covs_tuple]
@@ -152,9 +163,9 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
         cov1 = chrX_covs_func()
         cov2 = chrX_covs_func()
         tcov = cov1 + cov2
-        if cov_frac_dist_raw_counts[tcov] == []:
-            cov_frac_dist_raw_counts[tcov] = [0]*tcov
-        cov_frac_dist_raw_counts[tcov][cov1] += 1
+        if cov_frac_dist_raw_counts[tcov+1] == []:
+            cov_frac_dist_raw_counts[tcov+1] = [0]*(tcov+1)
+        cov_frac_dist_raw_counts[tcov+1][cov1] += 1
 
     for cov in cov_frac_dist_raw_counts.keys():
         for i, count in enumerate(cov_frac_dist_raw_counts[cov]):
@@ -173,18 +184,23 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
     def condense(l, binsize):
         return [sum(x) for x in chunks(l,binsize)]
 
-
     last_lst = []
-    for i in range(COV_INTERVAL,max_cov,COV_INTERVAL):
+    for i in range(NUM_BINS,max_cov+NUM_BINS,NUM_BINS):
         binsize = int(i / NUM_BINS)
         lst = condense(cov_frac_dist_raw[i], binsize)
         if lst == []:
             lst = last_lst
+        
+        for j in range(int(len(lst)/2)):
+            val = (lst[j] + lst[len(lst)-j-1]) / 2  # mean of values on symmetrical sides of distribution
+            lst[j] = val
+            lst[len(lst)-j-1] = val
+        
         for j in range(i,i+NUM_BINS):
             cov_frac_dist[j] = lst
         last_lst = lst
 
-    for i in range(NUM_BINS,2000):
+    for i in range(NUM_BINS,max_cov+NUM_BINS):
         assert(len(cov_frac_dist[i]) == NUM_BINS)
 
     total_position_counts = sum([chamber_position_counts[chamber] for chamber in range(0,24)])
@@ -249,13 +265,6 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
             # the likelihood of the observed data given this value for p_null
             # is the product of likelihoods of each observed coverage value
             likelihood += strand_coverage_counts[j] * coverage_dict[j]
-
-
-        expected_proportions = [10**x for x in coverage_dict.values()]
-
-        print("i={} ".format(i),end='')
-        print(expected_proportions,end='')
-        print(likelihood)
 
         if likelihood > max_likelihood:
             max_likelihood = likelihood

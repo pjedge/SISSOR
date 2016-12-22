@@ -7,7 +7,6 @@ from math import log10
 #if False:
 #    set_trace() # to dodge warnings that pdb isn't being used.
 import time
-import re
 import pickle
 from collections import defaultdict
 import common
@@ -87,6 +86,7 @@ def parseargs():
 ## READ THEM IN LATER USING initialize_parameters() FUNCTION
 
 p_null = pickle.load(open("{}/p_null.p".format(parameters_dir), "rb" )) # estimated p_null, the probability of a strand not being sampled.
+MDA_dist = pickle.load(open("{}/MDA_dist.p".format(parameters_dir), "rb" )) # distribution of observed MDA error
 ch_priors = pickle.load(open("{}/ch_priors.p".format(parameters_dir), "rb" )) # prior probability of sampling from a chamber
 cov_frac_dist = pickle.load(open( "parameters/cov_frac_dist.p", "rb")) # PROBABILITY OF SEEING PARENT 1 ALLELE IN MIXED ALLELE CHAMBER
 hom_config_probs = pickle.load(open( "parameters/hom_config_probs.p", "rb")) # STRAND-TO-CHAMBER CONFIGURATIONS
@@ -98,8 +98,6 @@ genotype_priors = pickle.load(open( "parameters/genotype_priors.p", "rb"))
 MDA_ERR = 1e-5 # the probability of consensus error due to MDA
 MDA_COR = log10(1 - MDA_ERR)
 MDA_ERR = log10(MDA_ERR) - log10(3) # the log probability of an MDA error, divided by 3
-
-cov_frac_limit = 15
 
 NUM_BINS = 20
 COV_INTERVAL = 10
@@ -290,17 +288,18 @@ def pr_one_chamber_data(alleles_present, base_data, qual_data, fast_mode):
 
         p = tinylog
 
-        L = len(MDA_error_dist[n])
-        for i, p_frac in enumerate(MDA_error_dist[n]): # MDA_error_dist[0] has MDA error distribution for 1..10, MDA_error_dist[1] has MDA error distribution for 11..20
-            p_frac = log10(p_frac) if p_frac > 0 else None
-            if p_frac == None:
+        L = len(MDA_dist[n])
+        for i, p_frac in enumerate(MDA_dist[n]): # MDA_dist[0] has MDA error distribution for 1..10, MDA_error_dist[1] has MDA error distribution for 11..20
+            if p_frac == 0:
                 continue
+            p_frac = log10(p_frac / 3) # divide by 3 because there are 3 possible bases to error to
+
             frac = i / L
 
             for MDA_allele in bases:
                 if MDA_allele == alleles_present[0]: # can't have main and secondary allele be the same...
                     continue
-                p0 = p_frac - 3 # 3 possible bases to have an MDA error to
+                p0 = p_frac # 3 possible bases to have an MDA error to
                 for base,qual in zip(base_data, qual_data): # sum over all base/quals in pileup
                     p0 += two_allele_cache[(frac, qual, (MDA_allele == base), (alleles_present[0] == base))]
 
@@ -310,7 +309,7 @@ def pr_one_chamber_data(alleles_present, base_data, qual_data, fast_mode):
     elif len(alleles_present) == 2:
 
         # if fast mode (mostly reference bases) we use faster computation, assuming basically binomial
-        if fast_mode or n < cov_frac_limit:
+        if fast_mode:
             for base,qual in zip(base_data, qual_data):
                 p += two_allele_cache[(0.5, qual, (alleles_present[0] == base), (alleles_present[1] == base))]
         # we've observed a lot of non-reference bases. slower computation which sums over entire strand mixture probability distribution
@@ -785,8 +784,6 @@ def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only
                             max_v = v
                             max_k = k
 
-                    if(max_k == 'N'):
-                        set_trace()
                     maj_alleles.add(max_k)
 
             if len(maj_alleles) >= 3:
