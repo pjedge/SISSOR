@@ -445,14 +445,9 @@ def obtain_counts_parallel(input_file, boundary_files=None, suffix=''):
                         if len(bd) < coverage_cut:
                             continue
 
-                        nonzero_chambers[cell_num].append(ch_num)
-                        nonzero_chamber_count += 1
-
                         base_count = {'A':0,'G':0,'T':0,'C':0}
                         for b in bd:
                             base_count[b] += 1
-                            if b != ref_base:
-                                total_nonref += 1
 
                         base_count = sorted(list(base_count.items()),key=lambda x: x[1],reverse=True)
                         maj = base_count[0][1]

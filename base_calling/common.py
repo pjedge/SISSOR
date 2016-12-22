@@ -1,3 +1,8 @@
+coverage_cut = 2
+base_letters = 'ACGTacgt'
+numbers = '0123456789'
+bases = ['A','T','G','C']
+
 import re
 
 caret_money = re.compile(r'\^.|\$')
