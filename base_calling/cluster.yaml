@@ -15,7 +15,7 @@ accuracy_aggregate:
     walltime: '5:00:00'
 
 accuracy_count:
-    walltime: '5:00:00'
+    walltime: '10:00:00'
 
 liftover_wgs_SNPs:
     walltime: '40:00:00'

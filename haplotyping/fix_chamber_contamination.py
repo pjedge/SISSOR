@@ -8,7 +8,6 @@ Created on Thu May 19 21:44:48 2016
 import fragment
 import argparse
 import sys
-import numpy as np
 from collections import defaultdict
 import itertools
 

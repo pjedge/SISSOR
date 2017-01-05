@@ -25,7 +25,7 @@ merge_fragmat:
     walltime: '1:00:00'
 
 fix_fragmat:
-    ppn: 2
+    ppn: 1
     walltime: '4:00:00'
 
 make_fixed_beds:

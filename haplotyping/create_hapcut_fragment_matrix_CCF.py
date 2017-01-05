@@ -1,8 +1,7 @@
-from math import log10
 from collections import defaultdict
 import os
-import sys
-
+#import sys
+ 
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
 in1 = 'base_calling/het_vcfs/cutoff3/whole_genome.out'
@@ -15,8 +14,8 @@ in3 = 'output_dir_CCF_frag'
 n_cells = 3
 n_chambers = 24
 XCHAMBER = True
-MIN_Q    = 30
-MIN_COV  = 5
+MIN_BASE_PROB = 0.9 #MIN_Q    = 30
+MIN_COV  = 4
 
 chroms = ['chr{}'.format(x) for x in range(1,23)] + ['chrX','chrY']
 chrom_num = dict()
@@ -42,12 +41,36 @@ def parse_bedfile(input_file):
 
     return boundaries
 
-def create_hapcut_fragment_matrix_CCF(chamber_call_file=in1, fragment_boundary_files=in2, output_dir=in3):
+short_chrom_names = set([str(x) for x in range(1,23)]+['X','Y'])
+chrom_names = set(['chr'+str(x) for x in range(1,23)]+['chrX','chrY'])
+
+def format_chrom(chrom_str):
+    if chrom_str in short_chrom_names:
+        chrom_str = 'chr' + chrom_str
+    assert(chrom_str in chrom_names)
+    return chrom_str
+
+def create_hapcut_fragment_matrix_CCF(chamber_call_file, variant_vcf_files, fragment_boundary_files, output_dir):
 
     fragment_boundaries = []
     for i in range(0,n_cells*n_chambers):
         bfile = fragment_boundary_files[i]
         fragment_boundaries.append(parse_bedfile(bfile))
+    
+    snp_indices = dict() # chrom -> list of snp indices
+
+    for variant_vcf_file in variant_vcf_files:
+        ix_counter = 0
+        with open(variant_vcf_file, 'r') as infile:
+    
+            for line in infile:
+                if (line[0] == '#' or len(line) < 2):
+                    continue
+                el = line.strip().split()
+                chrom = format_chrom(el[0])
+                pos   = int(el[1])-1
+                snp_indices[(chrom,pos)] = ix_counter,el[3],el[4] # given a chromosome and genomic index, return the SNP index within that chroms vcf
+                ix_counter += 1
 
     #fragment_list[i][j] is the jth fragment
     fragment_list = [[[]] for i in range(n_chambers*n_cells)]
@@ -55,22 +78,21 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file=in1, fragment_boundary_f
     with open(chamber_call_file,'r') as ccf:
         #print('chr\tpos\tsissor_call\tCGI_allele\tref',file=mof)
 
-        snp_ix = -1
-        prev_ccf_chrom = None
         for line in ccf:
             if len(line) < 3: # empty line
                 continue
             ccf_line = line.strip().split('\t')
             ccf_chrom = ccf_line[0]
-
-            if ccf_chrom != prev_ccf_chrom:
-                snp_ix = -1
-            prev_ccf_chrom = ccf_chrom
-
-            snp_ix += 1
-
-            ccf_pos   = int(ccf_line[1])
+            assert(ccf_chrom in chrom_names)
+            
+            ccf_pos   = int(ccf_line[1]) - 1
+                        
+            snp_ix, ref_allele2, variant_allele = snp_indices[(ccf_chrom, ccf_pos)]
+            
             ref_allele = {ccf_line[2]}
+            
+            assert({ref_allele2} == ref_allele)
+            
 
             if ccf_chrom in ['chrX','chrY']:
                 continue
@@ -79,12 +101,12 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file=in1, fragment_boundary_f
             if 'TOO_MANY_ALLELES' in tags or 'TOO_MANY_CHAMBERS' in tags or 'ADJACENT_INDEL_OR_CLIP' in tags:
                 continue
 
-            call = ccf_line[3]
+            call = ccf_line[4]
 
             if call == '*':
                 continue
 
-            el2 = call.split(';')
+            #el2 = call.split(';')
 
             #genotype_prob = -1
             #max_genotype = 'NN'
@@ -100,6 +122,9 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file=in1, fragment_boundary_f
             base_call_list = [x for x in ccf_line[5:80] if 'CELL' not in x]
 
             for i,call in enumerate(base_call_list):
+
+                if call == '*':
+                    continue
 
                 xchamber_calls, basic_calls, pileup = call.split('|')
 
@@ -129,6 +154,18 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file=in1, fragment_boundary_f
                 if not (frg_chrom == ccf_chrom and frg_start <= ccf_pos and frg_end >= ccf_pos):
                     continue
 
+                basecounts = defaultdict(int)
+                for base in pileup:
+                    basecounts[base] += 1
+
+                max_base = 'N'
+                max_v = -1
+                for k,v in basecounts.items():
+                    if v > max_v:
+                        max_v = v
+                        max_base = k
+                        
+                
                 if len(pileup) < MIN_COV:
                     continue
 
@@ -136,9 +173,6 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file=in1, fragment_boundary_f
                     call = xchamber_calls
                 else:
                     call = basic_calls
-
-                if call == '*':
-                    continue
 
                 el2 = call.split(';')
 
@@ -157,24 +191,27 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file=in1, fragment_boundary_f
                     if prob > max_prob:
                         max_prob = prob
                         max_allele = allele
-
-                if max_prob < MIN_Q:
+                
+                if (len(max_allele) == 1 and max_allele != {max_base}):
+                    print(line,end='')
+                    continue
+                
+                if max_prob < MIN_BASE_PROB:
                     continue
 
                 if len(max_allele) == 2:
                     binary_allele = 'M'
                 elif max_allele == ref_allele:
                     binary_allele = '0'
-                else:
+                elif max_allele == {variant_allele}:
                     binary_allele = '1'
 
-                p_err = 1 - max_prob
-                if p_err < 1e-10:
-                    p_err = 1e-10
-                qual = int(-10 * log10(p_err))
-
-                #q_char = '~' if qual>=93 else chr(33 + qual)
-                q_char = '5'
+                #p_err = 1 - max_prob
+                #if p_err < 1e-10:
+                #    p_err = 1e-10
+                #qual = int(-10 * log10(p_err))
+                
+                q_char = '5' # q_char = '~' if qual>=93 else chr(33 + qual)
 
                 fragment_list[i][-1].append((snp_ix, ccf_chrom, ccf_pos, binary_allele, q_char, frg_start, frg_end, cell, ch_num))
 

@@ -389,7 +389,7 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
     genotype_set = genotypes if condensed_genotype_set == None else condensed_genotype_set
 
     for G in genotype_set:
-
+        
         configs = hom_het_configs[0] if G[0] == G[1] else hom_het_configs[1]
         #configs = hom_het_configs[1]
         p_total = tinylog
@@ -554,7 +554,7 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
 
     res2 = [(allele,10**(allele_count[allele] - total)) for allele in bases]
 
-    allele_str = ';'.join(['{}:{}'.format(a,p) for a,p in res2])
+    allele_str = ';'.join(['{0}:{1:.24f}'.format(a,p) for a,p in res2])
     gen_str = ';'.join(['{}:{}'.format(''.join(g),p) for g,p in res])
     outline_el[0] = allele_str
     outline_el[1] = gen_str
@@ -755,7 +755,7 @@ def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only
 
             if total_nonref < min_nonref:
                 fast_mode = True # skip heavy computation for likely non-SNV
-                condensed_genotype_set = [G for G in genotypes if major_allele in G]
+                #condensed_genotype_set = [G for G in genotypes if major_allele in G]
 
             if SNPs_only and total_nonref < min_nonref:
                 continue
@@ -774,6 +774,10 @@ def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only
                 for chamber in nonzero_chambers[cell]:
 
                     basecounts = defaultdict(int)
+                    
+                    if len(base_data[cell][chamber]) < 3: # we can expect some weirdness at low coverage
+                        continue
+                    
                     for base in base_data[cell][chamber]:
                         basecounts[base] += 1
 
@@ -786,7 +790,7 @@ def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only
 
                     maj_alleles.add(max_k)
 
-            if len(maj_alleles) >= 3:
+            if len(maj_alleles) >= 5:
                 tags.append('TOO_MANY_ALLELES')
 
             if nonzero_chamber_count > 0 and not too_many_chambers:

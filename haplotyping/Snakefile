@@ -10,6 +10,8 @@ sys.path.append('/home/peter/git/HapTools')
 configfile: "config.yaml"
 localrules: all, plot_hapcut2_results, simlinks, clean
 
+HAPCUT2 = '/home/pedge/git/hapcut2/build/HAPCUT2'
+
 import sys
 sys.path.append(config['haptools_dir'])
 import run_tools
@@ -78,11 +80,11 @@ chroms  = ['chr{}'.format(i) for i in range(1,23)]
 samples = ['PGP1_ALL','PGP1_21','PGP1_22','PGP1_A1']
 cells=samples[1:]
 
-variant_vcf_dir = join(data_dir,'PGP1_VCFs')
-variant_vcf_dir_fp = join(data_dir,'PGP1_VCFs_w_false_positives')
-
+SISSOR_vcf_dir = 'sissor_project/data/PGP1_VCFs_SISSORindex'
+BAC_vcf_dir = 'sissor_project/data/PGP1_VCFs_BACindex'
 rule all:
     input:
+        #expand("sissor_project/data/BAC/{c}.filtered",c=['chr20'])
         expand("{P}/sissor_haplotype_error_chromosome.png",P=config['plots_dir']),
         expand("{P}/sissor_haplotype_error_genome.png",P=config['plots_dir']),
         #expand("{d}/{s}/fixed_beds/ch{ch}.bed",d=data_dir,s=cells,ch=chambers)
@@ -113,8 +115,8 @@ rule calculate_error_rates:
         hapblocks = expand("{E}/hapcut2_PGP1_ALL/{exp}/{c}.output",E=experiments_dir,exp=exp,c=chroms),
         runtimes  = expand("{E}/hapcut2_PGP1_ALL/{exp}/{c}.runtime",E=experiments_dir,exp=exp,c=chroms),
         fragmats  = expand("{d}/PGP1_ALL/fragmat/{exp}/{c}",d=data_dir,exp=exp,c=chroms),
-        var_vcfs  = expand("{v}/{c}.vcf",v=variant_vcf_dir,c=chroms),
-        bac_haps  = expand("{bac}/{c}.filtered",bac=config['BAC_hapblocks'], c=chroms)
+        var_vcfs  = expand("{v}/{c}.vcf",v=BAC_vcf_dir, c=chroms),
+        bac_haps  = expand("sissor_project/data/BAC/{c}.filtered",c=chroms)
     output:
         stats_file  = "{}/hapcut2.stats.p".format(config['error_rates_dir']),
         labels_file = "{}/hapcut2.labels.p".format(config['error_rates_dir'])
@@ -129,9 +131,9 @@ rule calculate_error_rates:
                 assembly_file = "{}/hapcut2_PGP1_ALL/{}/{}.output".format(config['experiments_dir'],x,c)
                 runtime_file  = "{}/hapcut2_PGP1_ALL/{}/{}.runtime".format(config['experiments_dir'],x,c)
                 frag_file     = "{}/PGP1_ALL/fragmat/{}/{}".format(data_dir,x,c)
-                vcf_file      = "{}/{}.vcf".format(variant_vcf_dir,c)
+                vcf_file      = "{}/{}.vcf".format(BAC_vcf_dir,c)
                 truth_file    = "{}/{}.filtered".format(config['BAC_hapblocks'], c)
-                err = error_rates.hapblock_hapblock_error_rate(truth_file, assembly_file, frag_file, vcf_file, runtime_file, use_SNP_index=False)
+                err = error_rates.hapblock_hapblock_error_rate(truth_file, assembly_file, frag_file, vcf_file, runtime_file, use_SNP_index=True)
                 datalist.append(err)
 
             print("{} results over all chromosomes:".format(x))
@@ -153,7 +155,7 @@ rule prune_haplotype:
         hapblocks = expand("{E}/hapcut2_{{s}}/{{x}}/{c}.output",E=experiments_dir,c=chroms)
     run:
         for i, o in zip(input.hapblocks,output.hapblocks):
-            fileIO.prune_hapblock_file(i, o, snp_conf_cutoff=0.95, split_conf_cutoff=0.49, use_refhap_heuristic=True) #split_conf_cutoff=0.9999
+            fileIO.prune_hapblock_file(i, o, snp_conf_cutoff=0.95, split_conf_cutoff=0.5, use_refhap_heuristic=True) #split_conf_cutoff=0.9999
 
 # RUN HAPCUT2
 rule run_hapcut2:
@@ -161,7 +163,7 @@ rule run_hapcut2:
         job_name = "{s}.{c}.{x}.hapcut",
     input:
         frag_file = "%s/{s}/fragmat/{x}/{c}" % data_dir,
-        vcf_file  = lambda wildcards: expand("{v}/{c}.vcf", v=variant_vcf_dir,c=wildcards.c)
+        vcf_file  = lambda wildcards: expand("{v}/{c}.vcf", v=BAC_vcf_dir,c=wildcards.c)
     output:
         hapblocks = "{E}/hapcut2_{s}/{x}/{c}.output.uncorrected",
         runtime = "{E}/hapcut2_{s}/{x}/{c}.runtime"
@@ -171,50 +173,12 @@ rule run_hapcut2:
         with open(output.runtime,'w') as rf:
             print(runtime, file=rf)
 
-# CREATE BED FILES FOR THE NEW FIXED FRAGMENTS
-'''
-rule make_fixed_beds:
-    params:
-        job_name  = "make_fixed_beds",
-    input:
-        expand("{d}/PGP1_ALL/fragmat/cov1_strict/{c}",d=data_dir,c=chroms)
-    output:
-        expand("{d}/{s}/fixed_beds/ch{ch}.bed",d=data_dir,s=cells,ch=chambers)
-    run:
-        cell_boundaries = defaultdict(list) # key: (cell,chamber#,chrom)  value: (start, end)
-
-        for chrom in chroms:
-            infile = "{}/PGP1_ALL/fragmat/cov1_strict/{}".format(data_dir,chrom)
-            with open(infile,'r') as inf:
-                for line in inf:
-                    if len(line) < 3:
-                        continue
-                    el = line.strip().split()
-                    ID = el[1]
-                    el2 = ID.split(':')
-                    boundstr = el2[-1]
-                    (start, end) = [int(x) for x in boundstr.split('-')]
-                    cell = el2[2]
-                    chamber = el2[3]
-                    chambernum = int(chamber[2:])
-                    cell_boundaries[(cell,chambernum,chrom)].append((start, end))
-
-        for cell in cells:
-            for chamber in chambers:
-                outfile = '{}/{}/fixed_beds/ch{}.bed'.format(data_dir,cell,chamber)
-                with open(outfile,'w') as of:
-                    for chrom in chroms:
-                        cell_boundaries[(cell,chamber,chrom)].sort()
-                        for start, end in cell_boundaries[(cell,chamber,chrom)]:
-                            line = '{}\t{}\t{}\t{}\tchamber{}'.format(chrom, start, end, end-start, chamber)
-                            print(line,file=of)
-'''
 # COMBINE FRAGMENT MATRICES
 rule fix_fragmat:
     params:
         job_name  = "fix_fragmat.{x}",
     input:
-        var_vcfs = expand("{v}/{CHR}.vcf",v=variant_vcf_dir,CHR=chroms),
+        var_vcfs = expand("{v}/{CHR}.vcf",v=BAC_vcf_dir,CHR=chroms),
         P_ALL = expand("{dat}/PGP1_ALL/augmented_fragmat/{c}",dat=data_dir,c=chroms)
     output:
         fixed = expand("{{data_dir}}/PGP1_ALL/fragmat/{{x}}/{c}",c=chroms)
@@ -237,20 +201,15 @@ rule fix_fragmat:
 
 rule generate_fragmatrix:
     params: job_name = 'generate_fragmatrix'
-    input:  ccf      = 'base_calling/het_vcfs/cutoff3/whole_genome.out',
-            vcf      = 'base_calling/het_vcfs/cutoff3/whole_genome.vcf',
-            bounds   = expand('base_calling/fragment_boundary_beds/{ce}/ch{ch}.bed',ce=cells,ch=chambers),
+    input:  ccf      = 'sissor_project/data/PGP1_ALL.het.whole_genome.ccf',
+            vcfs     = expand('{v}/{c}.vcf',v=BAC_vcf_dir,c=chroms),
+            bounds   = expand('sissor_project/data/eric_fragment_boundary_beds/{ce}/ch{ch}.bed',ce=cells,ch=chambers),
     output: fragmat  = expand('sissor_project/data/PGP1_ALL/augmented_fragmat/{c}',c=chroms),
-            vcfs     = expand('sissor_project/data/PGP1_VCFs/{c}.vcf',c=chroms)
+
     run:
         odir = 'sissor_project/data/PGP1_ALL/augmented_fragmat'
-
         # generate fragment matrix from sissorhands base calls
-        create_hapcut_fragment_matrix_CCF(chamber_call_file=input.ccf, fragment_boundary_files=input.bounds, output_dir=odir)
-
-        #split vcf file into separate chromosome VCF files
-        for chrom in chroms:
-            shell('grep -P "^{chrom}\t" {input.vcf} > sissor_project/data/PGP1_VCFs/{chrom}.vcf')
+        create_hapcut_fragment_matrix_CCF(chamber_call_file=input.ccf, variant_vcf_files=input.vcfs,fragment_boundary_files=input.bounds, output_dir=odir)
 
 rule combine_filtered:
     params: job_name = 'combine_filtered'
@@ -264,10 +223,10 @@ rule combine_filtered:
 
 rule filter_CCF:
     params: job_name = 'filter_CCF_{chrom}.{start}.{end}'
-    input:  ccf      = 'base_calling/output/split/{chrom}.{start}.{end}.out',
-            vcf      = 'sissor_project/data/PGP1_VCFs_old/all.vcf'
-    output: ccf      = 'sissor_project/data/ccf_split/{chrom}.{start}.{end}.ccf',
-            vcf      = 'sissor_project/data/vcf_split/{chrom}.{start}.{end}.vcf',
+    input:  ccf      = '../base_calling/output/split/{chrom}.{start}.{end}.out',
+            vcf      = 'sissor_project/data/PGP1_VCFs_BACindex/all.vcf'
+    output: ccf      = temp('sissor_project/data/ccf_split/{chrom}.{start}.{end}.ccf'),
+            vcf      = temp('sissor_project/data/vcf_split/{chrom}.{start}.{end}.vcf'),
     run:
         het_pos = dict()
         reg_chrom = str(wildcards.chrom)
@@ -294,38 +253,46 @@ rule filter_CCF:
                     print(line.strip(),file=ccf_out)
                     print(het_pos[(chrom,pos)],file=vcf_out)
 
-# COMBINE FRAGMENT MATRICES
-'''
-rule merge_fragmat:
-    params:
-        job_name  = "merge_fragmat",
-    input:
-        P21      = expand("{dat}/PGP1_21/augmented_fragmat/{c}",dat=data_dir,c=chroms),
-        P22      = expand("{dat}/PGP1_22/augmented_fragmat/{c}",dat=data_dir,c=chroms),
-        PA1      = expand("{dat}/PGP1_A1/augmented_fragmat/{c}",dat=data_dir,c=chroms),
-        var_vcfs = expand("{v}/{CHR}.vcf",v=variant_vcf_dir,CHR=chroms)
-    output:
-        P_ALL = expand("{dat}/PGP1_ALL/augmented_fragmat/{c}",dat=data_dir,c=chroms)
-    run:
-        for i1, i2, i3, o in zip(input.P21, input.P22, input.PA1, output.P_ALL):
-            shell('cat {i1} {i2} {i3} > {o}')
+# assemble BAC haplotypes
 
-# CREATE AUGMENTED FRAGMENT MATRIX FILES WITH HETEROZYGOUS CALL LOCATIONS
-# SAME FORMAT AS BEFORE, BUT NOW '2' represents a heterozygous call
-rule create_augmented_fragmat:
+rule prune_BAC:
     params:
-        job_name  = "{s}.create_augmented_fragmat",
+        job_name = "BAC.prune_haplotype",
     input:
-        ploidy1_vcfs = expand("{{data_dir}}/{{s}}/ploidy1/ch{ch}.vcf",ch=chambers),
-        ploidy2_vcfs = expand("{{data_dir}}/{{s}}/ploidy2/ch{ch}.vcf",ch=chambers),
-        beds         = expand("{{data_dir}}/{{s}}/beds/ch{ch}.bed",ch=chambers),
-        var_vcfs     = expand("{v}/{CHR}.vcf",v=variant_vcf_dir,CHR=chroms)
+        hapblocks = expand("sissor_project/data/BAC/{c}",c=chroms)
     output:
-        expand("{{data_dir}}/{{s}}/augmented_fragmat/{c}",c=chroms)
+        hapblocks = expand("sissor_project/data/BAC/{c}.filtered",c=chroms)
     run:
-        output_dir = os.path.join(data_dir,wildcards.s,'augmented_fragmat')
-        create_hapcut_fragment_matrices_freebayes(input.ploidy1_vcfs, input.ploidy2_vcfs, input.beds, wildcards.s, chambers_pad, input.var_vcfs, output_dir, hets_in_seq=True)
-'''
+        for i, o in zip(input.hapblocks,output.hapblocks):
+            fileIO.prune_hapblock_file(i, o, snp_conf_cutoff=0.9999, split_conf_cutoff=0.9999, use_refhap_heuristic=True) #split_conf_cutoff=0.9999
+
+# RUN HAPCUT2
+
+rule run_hapcut2_BAC:
+    params:
+        job_name = "{c}.BAC.hapcut2",
+    input:
+        frag_file = "%s/BAC_frags_fixed/{c}" % data_dir,
+        vcf_file  = "%s/{c}.vcf" % BAC_vcf_dir
+    output:
+        hapblocks = "sissor_project/data/BAC/{c}"
+    shell:
+        '''
+        {HAPCUT2} --fragments {input.frag_file} --vcf {input.vcf_file} --output {output.hapblocks} --ea 1
+        '''
+
+# REMOVE SWITCH ERRORS FROM BAC FRAGMENTS
+rule fix_fragmat_BAC:
+    params:
+        job_name  = "fix_fragmat_BAC_{c}",
+    input:
+        var_vcfs = "%s/{c}.vcf" % BAC_vcf_dir,
+        frags = "sissor_project/data/BAC_frags/{c}"
+    output:
+        fixed = "sissor_project/data/BAC_frags_fixed/{c}"
+    run:
+        fix_chamber_contamination(input.frags,input.var_vcfs,output.fixed,threshold=2, min_coverage=0,mode='basic')
+
 # simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
 
 rule simlinks:
@@ -362,38 +329,20 @@ rule simlinks:
             ln -s {config[PGP1_A1_beds]}/PGP1_A1_FragmentBoundaryCh{ch}.bed {data_dir}/PGP1_A1/beds/ch{ch}.bed
             ''')
 
-rule simlinks_new:
+rule copy_eric_boundaries:
     input:
-        #expand("{DIR}/PGP1_21_ch{chpad}.freebayes.remap.depth.new.vcf",DIR=config['PGP1_21_ploidy1'],chpad=chambers_pad),
-        #expand("{DIR}/PGP1_21_ch{chpad}.ploidy2.freebayes.depth.vcf",DIR=config['PGP1_21_ploidy2'],chpad=chambers_pad),
-        expand("{DIR}/ch{ch}.bed",DIR=config['PGP1_21_beds'],ch=chambers_pad),
-        #expand("{DIR}/PGP1_22_ch{chpad}.freebayes.remap.depth.vcf",DIR=config['PGP1_22_ploidy1'],chpad=chambers_pad),
-        #expand("{DIR}/PGP1_22_ch{chpad}.ploidy2.freebayes.vcf",DIR=config['PGP1_22_ploidy2'],chpad=chambers_pad),
-        expand("{DIR}/ch{ch}.bed",DIR=config['PGP1_22_beds'],ch=chambers_pad),
-        #expand("{DIR}/PGP1_A1_ch{chpad}.freebayes.allpos.vcf",DIR=config['PGP1_A1_ploidy1'],chpad=chambers_pad),
-        #expand("{DIR}/PGP1_A1_ch{chpad}.freebayes.ploidy2.allpos.vcf",DIR=config['PGP1_A1_ploidy2'],chpad=chambers_pad),
-        expand("{DIR}/ch{ch}.bed",DIR=config['PGP1_A1_beds'],ch=chambers_pad),
+        expand("{DIR}/PGP1_21_FragmentBoundaryCh{ch}.bed",DIR=config['PGP1_21_beds'],ch=chambers),
+        expand("{DIR}/PGP1_22_FragmentBoundaryCh{ch}.bed",DIR=config['PGP1_22_beds'],ch=chambers),
+        expand("{DIR}/PGP1_A1_FragmentBoundaryCh{ch}.bed",DIR=config['PGP1_A1_beds'],ch=chambers),
     run:
         for ch,chpad in zip(chambers,chambers_pad):
             shell('''
-            mkdir -p {data_dir}/PGP1_21/ploidy1
-            mkdir -p {data_dir}/PGP1_21/ploidy2
-            mkdir -p {data_dir}/PGP1_21/beds
-            #ln -s {config[PGP1_21_ploidy1]}/PGP1_21_ch{chpad}.freebayes.remap.depth.new.vcf {data_dir}/PGP1_21/ploidy1/ch{ch}.vcf
-            #ln -s {config[PGP1_21_ploidy2]}/PGP1_21_ch{chpad}.ploidy2.freebayes.depth.vcf {data_dir}/PGP1_21/ploidy2/ch{ch}.vcf
-            ln -s {config[PGP1_21_beds]}/ch{ch}.bed {data_dir}/PGP1_21/beds/ch{ch}.bed
-            mkdir -p {data_dir}/PGP1_22/ploidy1
-            mkdir -p {data_dir}/PGP1_22/ploidy2
-            mkdir -p {data_dir}/PGP1_22/beds
-            #ln -s {config[PGP1_22_ploidy1]}/PGP1_22_ch{chpad}.freebayes.remap.depth.new.vcf {data_dir}/PGP1_22/ploidy1/ch{ch}.vcf
-            #ln -s {config[PGP1_22_ploidy2]}/PGP1_22_ch{chpad}.ploidy2.freebayes.vcf {data_dir}/PGP1_22/ploidy2/ch{ch}.vcf
-            ln -s {config[PGP1_22_beds]}/ch{ch}.bed {data_dir}/PGP1_22/beds/ch{ch}.bed
-            mkdir -p {data_dir}/PGP1_A1/ploidy1
-            mkdir -p {data_dir}/PGP1_A1/ploidy2
-            mkdir -p {data_dir}/PGP1_A1/beds
-            #ln -s {config[PGP1_A1_ploidy1]}/PGP1_A1_ch{chpad}.freebayes.allpos.vcf {data_dir}/PGP1_A1/ploidy1/ch{ch}.vcf
-            #ln -s {config[PGP1_A1_ploidy2]}/PGP1_A1_ch{chpad}.freebayes.ploidy2.allpos.vcf {data_dir}/PGP1_A1/ploidy2/ch{ch}.vcf
-            ln -s {config[PGP1_A1_beds]}/ch{ch}.bed {data_dir}/PGP1_A1/beds/ch{ch}.bed
+            mkdir -p {data_dir}/eric_fragment_boundary_beds/PGP1_21
+            cp {config[PGP1_21_beds]}/PGP1_21_FragmentBoundaryCh{ch}.bed sissor_project/data/eric_fragment_boundary_beds/PGP1_21/ch{ch}.bed
+            mkdir -p {data_dir}/eric_fragment_boundary_beds/PGP1_22
+            cp {config[PGP1_22_beds]}/PGP1_22_FragmentBoundaryCh{ch}.bed sissor_project/data/eric_fragment_boundary_beds/PGP1_22/ch{ch}.bed
+            mkdir -p {data_dir}/eric_fragment_boundary_beds/PGP1_A1
+            cp {config[PGP1_A1_beds]}/PGP1_A1_FragmentBoundaryCh{ch}.bed sissor_project/data/eric_fragment_boundary_beds/PGP1_A1/ch{ch}.bed
             ''')
 
 rule clean:

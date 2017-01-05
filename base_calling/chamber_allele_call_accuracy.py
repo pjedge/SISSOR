@@ -8,10 +8,15 @@ Created on Mon Oct  3 18:29:04 2016
 import pickle
 import re
 import pysam
+from collections import defaultdict
 
 GMS_LIMIT = 0.5
-chroms = set(['chr{}'.format(i) for i in range(1,23)])
+chroms = ['chr{}'.format(i) for i in range(1,23)]
 bases = {'A','T','G','C'}
+
+chr_num = dict()
+for i,chrom in enumerate(chroms):
+    chr_num[chrom] = i
 
 ref_allele_re = re.compile('ref_allele ([ACGT])')
 
@@ -86,13 +91,64 @@ def split_gms(infiles, chunklist, outputlst):
     if not output.closed:
         output.close()
 
+
+def same_mixture_occurs_twice(pileups):
+
+    mixtures_seen = set()
+    
+    for pileup in pileups:
+        
+        counter = defaultdict(int)
+        for base in pileup:
+            counter[base] += 1
+            
+        bases_seen = set()
+        for base, v in counter.items():
+            if v >= 3:
+                bases_seen.add(base)
+                
+        if len(bases_seen) >= 3:
+            return True
+            
+        elif len(bases_seen) == 2:
+            
+            mixture_str = ''.join(sorted(list(bases_seen)))
+            
+            if mixture_str in mixtures_seen:
+                return True
+            
+            mixtures_seen.add(mixture_str)
+            
+    return False
+    
+
+def parse_bedfile(input_file):
+
+    boundaries = []
+    with open(input_file,'r') as inf:
+        for line in inf:
+
+            if len(line) < 3:
+                continue
+
+            el = line.strip().split('\t')
+
+            chrom = el[0]
+            start = int(el[1])
+            stop  = int(el[2])
+
+            boundaries.append((chrom, start, stop))
+
+    return boundaries
+
+
 # chamber call file has results from SISSOR cross-chamber allele calls
 # GFF file has set of known alleles for individual (for comparison)
 # VCF file has another set of heterozygous SNVs for individual
 # cutoff is the minimum probability of an allele call to use it
 # result outfile simply contains the counts of match vs mismatched alleles
 # mismatch_outfile prints locations of mismatched allele calls
-def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_file, HG19, region, cutoff, counts_pickle_file, mismatch_outfile): #WGS_VCF_file,
+def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_file, HG19, region, cutoff, counts_pickle_file, mismatch_outfile, bedfile_filter): #WGS_VCF_file,
 
     dp_pat = re.compile("DP=(\d+)")
     qr_pat = re.compile(";QR=(\d+)")
@@ -267,6 +323,8 @@ def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_
     snv_mismatch = 0
     snv_match    = 0
 
+    fragment_boundaries = parse_bedfile(bedfile_filter)
+
     with open(chamber_call_file,'r') as ccf, open(mismatch_outfile,'w') as mof:
         #print('chr\tpos\tsissor_call\tCGI_allele\tref',file=mof)
         for line in ccf:
@@ -277,6 +335,36 @@ def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_
             if not (ccf_chrom == region_chrom and ccf_pos >= region_start and ccf_pos <= region_end):
                 continue
 
+            #######################################################################
+            #######################################################################
+            # filter out positions not covered by any fragment. Want to know if accuracy within fragments is better
+            if fragment_boundaries == []:
+                continue
+
+            f_chrom, f_start, f_end = fragment_boundaries[0]
+
+            # if we're behind fragment start, skip this spot
+            if chr_num[ccf_chrom] < chr_num[f_chrom] or (ccf_chrom == f_chrom and ccf_pos < f_start):
+                continue
+
+            # if we're ahead of fragment start, skip to later fragment boundaries
+            while 1:
+                if fragment_boundaries == []:
+                    break
+                f_chrom, f_start, f_end = fragment_boundaries[0]
+                if chr_num[ccf_chrom] > chr_num[f_chrom] or (ccf_chrom == f_chrom and ccf_pos >= f_end):
+                    fragment_boundaries.pop(0)
+                else:
+                    break
+
+            # if we're not inside fragment, continue
+            if not(ccf_chrom == f_chrom and ccf_pos >= f_start and ccf_pos < f_end):
+                continue
+            #######################################################################
+            #######################################################################
+                        
+                        
+                        
             if (ccf_chrom, ccf_pos) not in gms_set:  # poor mappability
                 continue
 
@@ -287,7 +375,7 @@ def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_
             if ccf_chrom == 'chrX' or ccf_chrom == 'chrY':
                 continue
 
-            if 'TOO_MANY_ALLELES' in tags or 'TOO_MANY_CHAMBERS' in tags or 'ADJACENT_INDEL_OR_CLIP' in tags:
+            if 'TOO_MANY_CHAMBERS' in tags or 'ADJACENT_INDEL_OR_CLIP' in tags: # 'TOO_MANY_ALLELES' in tags or 
                 continue
 
             call = ccf_line[3]
@@ -298,6 +386,7 @@ def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_
             el2 = call.split(';')
 
             alleles = set()
+
             for entry in el2:
 
                 allele, prob = entry.split(':')
@@ -305,15 +394,29 @@ def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_
 
                 if prob > cutoff:
                     alleles.add(allele)
-                    #max_genotype = genotype
-
+            
             if len(alleles) == 0:
                 continue
+            
+            base_call_list = [x for x in ccf_line[5:80] if 'CELL' not in x]
+            
+            pileups = []
+            for call in base_call_list:
+                if call == '*':
+                    continue
 
+                xchamber_calls, basic_calls, pileup = call.split('|')
+
+                pileups.append(pileup)
+
+            
+            if same_mixture_occurs_twice(pileups): # likely mapping issue
+                continue
+            
             '''
             ccf_alleles       = []
             has_allele_mix = False
-
+            
             base_call_list = [x for x in ccf_line[5:80] if 'CELL' not in x]
 
             for call in base_call_list:
@@ -374,7 +477,7 @@ def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_
 
                 print('\t'.join(el),file=mof)
 
-            elif allele != {ref_allele} and alleles <= truth_dict[(ccf_chrom,ccf_pos)]:
+            elif alleles != {ref_allele} and alleles <= truth_dict[(ccf_chrom,ccf_pos)]:
 
                 snv_match += 1
 
@@ -434,17 +537,19 @@ def accuracy_aggregate(counts_pickle_files, result_outfile):
     The SNV FDR is the SNP false discovery rate, snv_mismatch / (snv_mismatch + snv_match)
     '''
 
-
+    error_rate = mismatch / total_known if total_known > 0 else 'N/A'
+    snv_fdr    = snv_mismatch / (snv_mismatch + snv_match) if (snv_mismatch + snv_match) > 0 else 'N/A'
+    
     with open(result_outfile,'w') as rof:
         print("POSTERIOR CUTOFF:   {}".format(cutoff),file=rof)
         print("CALLS ABOVE CUTOFF: {}".format(total_called),file=rof)
         print("---------------------------",file=rof)
         print("HAVE TRUTH:         {}".format(total_known),file=rof)
         print("MISMATCH:           {}".format(mismatch),file=rof)
-        print("ERROR RATE:         {}".format(mismatch / total_known),file=rof)
+        print("ERROR RATE:         {}".format(error_rate),file=rof)
         print("---------------------------",file=rof)
         print("SNV MATCH:          {}".format(snv_match),file=rof)
         print("SNV MISMATCH:       {}".format(snv_mismatch),file=rof)
-        print("SNV FDR:            {}".format(snv_mismatch / (snv_mismatch + snv_match)),file=rof)
+        print("SNV FDR:            {}".format(snv_fdr),file=rof)
         print("---------------------------",file=rof)
         print(description)

@@ -20,12 +20,9 @@ PGP1_A1_ploidy2: /oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/freebayes/ploidy2
 #PGP1_22_beds:    /home/pedge/git/SISSOR/base_calling/fragment_boundary_beds/PGP1_22 #/oasis/tscc/scratch/wkchu/SISSOR/PGP1_22_highoutput
 #PGP1_A1_beds:    /home/pedge/git/SISSOR/base_calling/fragment_boundary_beds/PGP1_A1 #/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/fragmentboundarybed
 
-
 PGP1_21_beds:    /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/fragmentboundarybed
-PGP1_22_beds:    /oasis/tscc/scratch/wkchu/SISSOR/PGP1_22_highoutput
+PGP1_22_beds:    /oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/previous/fragmentboundarybed
 PGP1_A1_beds:    /oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/fragmentboundarybed
-
-
 
 cell_ids:
     - PGP1_21
