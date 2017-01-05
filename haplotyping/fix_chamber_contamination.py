@@ -20,10 +20,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Split SISSOR fragments with switch errors')
     # paths to samfiles mapping the same ordered set of RNA reads to different genomes
     parser.add_argument('-f', '--fragments', nargs='?', type = str, help='fragment file to process')
+    parser.add_argument('-v', '--vcf_file', nargs='?', type = str, help='vcf file')
     parser.add_argument('-o', '--output', nargs='?', type = str, help='output fragments')
-    parser.add_argument('-t', '--threshold', nargs='?', type = int, help='number of consecutive mismatches with respect to another fragment that count as contamination', default = 4)
-    parser.add_argument('-f', '--filter', nargs='?', type = int, help='filter for only positions with coverage >= this amount', default = 0)
-
+    parser.add_argument('-t', '--threshold', nargs='?', type = int, help='number of consecutive mismatches with respect to another fragment that count as contamination', default = 3)
+    parser.add_argument('-m', '--min_cov', nargs='?', type = int, help='filter for only positions with coverage >= this amount', default = 0)
+    parser.add_argument('-M', '--mode', nargs='?', type = str, help='processing mode', default='basic')
 
     # default to help option. credit to unutbu: http://stackoverflow.com/questions/4042452/display-help-message-with-python-argparse-when-script-is-called-without-any-argu
     if len(sys.argv) < 3:
@@ -456,7 +457,7 @@ def filter_het_positions(flist):
 
     return filtered_flist
 
-def fix_chamber_contamination(fragmentfile, vcf_file, outfile, threshold=2, min_coverage=0, mode='strict'):
+def fix_chamber_contamination(fragmentfile, vcf_file, outfile, threshold=2, min_coverage=0, mode='none'):
 
     # READ FRAGMENT MATRIX
     flist = fragment.read_fragment_matrix(fragmentfile,vcf_file)
@@ -500,4 +501,4 @@ def fix_chamber_contamination(fragmentfile, vcf_file, outfile, threshold=2, min_
 
 if __name__ == '__main__':
     args = parse_args()
-    fix_chamber_contamination(args.fragments,args.output, args.threshold, args.filter)
+    fix_chamber_contamination(args.fragments,args.vcf_file, args.output, args.threshold, args.min_cov, args.mode)
