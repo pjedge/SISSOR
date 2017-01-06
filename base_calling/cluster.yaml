@@ -17,6 +17,9 @@ accuracy_aggregate:
 accuracy_count:
     walltime: '10:00:00'
 
+accuracy_count_strand_pairing:
+    walltime: '10:00:00'
+
 liftover_wgs_SNPs:
     walltime: '40:00:00'
 

@@ -153,7 +153,7 @@ def assign_fragments(flist, outputfile):#hapblocks):
                 temp = (cell1,chamber1)
                 (cell1, chamber1) = (cell2, chamber2)
                 (cell2, chamber2) = temp
-            
+
             print('{}\t{}\t{}\t{}\t{}\t{}\t{}'.format(chrom, start, end, cell1, chamber1, cell2, chamber2), file=opf)
 
     print(total)
@@ -218,9 +218,9 @@ def annotate_paired_strands(chamber_call_file, fragment_assignment_file, output_
 
             for chrom, start, end, cell1, chamber1, cell2, chamber2 in current_paired_fragments:
 
-                
-                assert(cell1 < cell2 or (cell1 == cell2 and chamber1 < chamber2)
-                
+
+                assert(cell1 < cell2 or (cell1 == cell2 and chamber1 < chamber2))
+
                 new_tag = 'HP:{},{}:{},{}'.format(cell1,chamber1,cell2,chamber2)
                 new_tags.append(new_tag)
 
