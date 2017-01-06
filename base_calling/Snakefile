@@ -65,9 +65,10 @@ rule all:
     input:
         #expand('het_vcfs/cutoff{cut}/whole_genome.vcf',cut=het_vcf_cutoffs)
         #'accuracy_reports/new/split/chr2.145000001.150000000/7/mismatches'
-        #expand('accuracy_reports/new_paired/cutoff{cut}.results',cut=paired_cutoffs),
-        expand('output/split_paired/{r}.out',r=regions),
-        'strand_pairs/all',
+        expand('accuracy_reports/paired_same_cell/cutoff{cut}.results',cut=paired_cutoffs),
+        expand('accuracy_reports/paired_all_cells/cutoff{cut}.results',cut=paired_cutoffs),
+        #expand('output/split_paired/{r}.out',r=regions),
+        #'strand_pairs/all',
         #'parameters/MDA_dist.p'
 
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
@@ -96,16 +97,6 @@ rule het_vcf_file:
     run:
         base_calls_to_vcf.base_calls_to_vcf(input.ccfs,(1.0-10**(-1*int(wildcards.cut))),output.vcf, output.ccf_het)
 
-rule accuracy_aggregate_strand_pairing:
-    params: job_name = 'accuracy_aggregate_strand_pairing.{cut}'
-    input: counts = expand('accuracy_reports/new_paired/split/{r}/{{cut}}/counts.p',r=regions),
-            mof = expand('accuracy_reports/new_paired/split/{r}/{{cut}}/mismatches',r=regions),
-    output: report = 'accuracy_reports/new_paired/cutoff{cut}.results',
-            mof = 'accuracy_reports/new_paired/cutoff{cut}.mismatches'
-    run:
-        caca.accuracy_aggregate(input.counts,output.report)
-        shell('cat {input.mof} > {output.mof}')
-
 rule accuracy_count_strand_pairing:
     params: job_name = 'accuracy_count_strand_pairing.{chrom}.{start}.{end}'
     input:  ccf = 'output/split_paired/{chrom}.{start}.{end}.out',
@@ -114,15 +105,20 @@ rule accuracy_count_strand_pairing:
             gms = 'gms/{chrom}.{start}.{end}.gms',
             hg19 = HG19,
             wgs_vcf = 'wgs/wgs_hg19.vcf'
-    output: counts_lst = temp(expand('accuracy_reports/new_paired/split/{{chrom}}.{{start}}.{{end}}/{cut}/counts.p',cut=pairing_cutoffs)),
-            mof_lst = temp(expand('accuracy_reports/new_paired/split/{{chrom}}.{{start}}.{{end}}/{cut}/mismatches',cut=pairing_cutoffs)),
+    output: counts_lst = temp(expand('accuracy_reports/paired_{mode}/split/{{chrom}}.{{start}}.{{end}}/{cut}/counts.p',cut=pairing_cutoffs)),
+            mof_lst = temp(expand('accuracy_reports/paired_{mode}/split/{{chrom}}.{{start}}.{{end}}/{cut}/mismatches',cut=pairing_cutoffs)),
     run:
         reg_chrom = str(wildcards.chrom)
         reg_start = int(wildcards.start)
         reg_end   = int(wildcards.end)
         region = (reg_chrom, reg_start, reg_end)
+
+        if wildcards.mode not in ['same_cell','all_cells']:
+            exit(1)
+        same_cell_only = (wildcards.mode == 'same_cell')
+
         for counts, mof, cut in zip(output.counts_lst, output.mof_lst, pairing_cutoffs):
-            caca.accuracy_count_strand_pairing(input.ccf, input.gff, input.wgs_vcf, input.cgi_vcf, input.gms, input.hg19, region, (1.0-10**(-1*int(cut))), counts, mof)
+            caca.accuracy_count_strand_pairing(input.ccf, input.gff, input.wgs_vcf, input.cgi_vcf, input.gms, input.hg19, region, (1.0-10**(-1*int(cut))), counts, mof, same_cell_only=same_cell_only)
 
 rule annotate_strand_pairs:
     params: job_name = 'annotate_strand_pairs.{r}'
@@ -140,7 +136,7 @@ rule combine_paired_strand_files:
 
 rule pair_strands:
     params: job_name = 'pair_strands'
-    input: frag = '../haplotyping/sissor_project/data/bak/basic_base_calling/PGP1_ALL/fragmat/cov1_basic/{chrom}', #'../haplotyping/sissor_project/data/PGP1_ALL/fragmat/cov1_basic/{chrom}',
+    input: frag = '../haplotyping/sissor_project/data/PGP1_ALL/fragmat/cov1_basic/{chrom}',
            vcf  = '../haplotyping/sissor_project/data/PGP1_VCFs_BACindex/{chrom}.vcf'
     output: sep = 'strand_pairs/{chrom}',
     run:
@@ -149,16 +145,16 @@ rule pair_strands:
 
 rule accuracy_aggregate:
     params: job_name = 'accuracy_aggregate.{cut}'
-    input: counts = expand('accuracy_reports/new/split/{r}/{{cut}}/counts.p',r=regions),
-            mof = expand('accuracy_reports/new/split/{r}/{{cut}}/mismatches',r=regions),
-    output: report = 'accuracy_reports/new/cutoff{cut}.results',
-            mof = 'accuracy_reports/new/cutoff{cut}.mismatches'
+    input: counts = expand('accuracy_reports/{report_name}/split/{r}/{{cut}}/counts.p',r=regions),
+            mof = expand('accuracy_reports/{report_name}/split/{r}/{{cut}}/mismatches',r=regions),
+    output: report = 'accuracy_reports/{report_name}/cutoff{cut}.results',
+            mof = 'accuracy_reports/{report_name}/cutoff{cut}.mismatches'
     run:
         caca.accuracy_aggregate(input.counts,output.report)
         shell('cat {input.mof} > {output.mof}')
 
-rule accuracy_count:
-    params: job_name = 'accuracy_count.{chrom}.{start}.{end}'
+rule accuracy_count_no_pairing:
+    params: job_name = 'accuracy_count_no_pairing.{chrom}.{start}.{end}'
     input:  ccf = 'output/split/{chrom}.{start}.{end}.out',
             gff = CGI_SNPs1,
             cgi_vcf  = CGI_SNPs2,
@@ -166,8 +162,8 @@ rule accuracy_count:
             hg19 = HG19,
             wgs_vcf = 'wgs/wgs_hg19.vcf',
             bed_filter = 'eric_fragment_boundary_beds/sorted_merged.bed'
-    output: counts_lst = temp(expand('accuracy_reports/new/split/{{chrom}}.{{start}}.{{end}}/{cut}/counts.p',cut=cutoffs)),
-            mof_lst = temp(expand('accuracy_reports/new/split/{{chrom}}.{{start}}.{{end}}/{cut}/mismatches',cut=cutoffs)),
+    output: counts_lst = temp(expand('accuracy_reports/no_pairing/split/{{chrom}}.{{start}}.{{end}}/{cut}/counts.p',cut=cutoffs)),
+            mof_lst = temp(expand('accuracy_reports/no_pairing/split/{{chrom}}.{{start}}.{{end}}/{cut}/mismatches',cut=cutoffs)),
     run:
         reg_chrom = str(wildcards.chrom)
         reg_start = int(wildcards.start)
