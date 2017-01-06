@@ -140,14 +140,20 @@ def assign_fragments(flist, outputfile):#hapblocks):
             cell1 = cell_map[el1[2]]
             chamber1 = el1[3]
             assert(chamber1[0:2] == 'CH')
-            chamber1 = int(chamber1[2:])
+            chamber1 = int(chamber1[2:]) - 1
 
             el2 = f2.name.split(':')
             cell2 = cell_map[el2[2]]
             chamber2 = el2[3]
             assert(chamber2[0:2] == 'CH')
-            chamber2 = int(chamber2[2:])
+            chamber2 = int(chamber2[2:]) - 1
 
+                # order the pairs in increasing cell, chamber
+            if not (cell1 < cell2 or (cell1 == cell2 and chamber1 < chamber2)):
+                temp = (cell1,chamber1)
+                (cell1, chamber1) = (cell2, chamber2)
+                (cell2, chamber2) = temp
+            
             print('{}\t{}\t{}\t{}\t{}\t{}\t{}'.format(chrom, start, end, cell1, chamber1, cell2, chamber2), file=opf)
 
     print(total)
@@ -193,7 +199,7 @@ def annotate_paired_strands(chamber_call_file, fragment_assignment_file, output_
 
             if paired_fragments != []:
 
-                while(chr_num[paired_fragments[0][0]] <= chr_num[ccf_chrom] and paired_fragments[0][1] <= ccf_pos):
+                while(chr_num[paired_fragments[0][0]] <= chr_num[ccf_chrom] or (paired_fragments[0][0] == ccf_chrom and paired_fragments[0][1] <= ccf_pos)):
                     current_paired_fragments.append(paired_fragments.pop(0))
 
             # filter out paired fragments that we're past
@@ -211,12 +217,10 @@ def annotate_paired_strands(chamber_call_file, fragment_assignment_file, output_
             new_tags = []
 
             for chrom, start, end, cell1, chamber1, cell2, chamber2 in current_paired_fragments:
-                    # order the pairs in increasing cell, chamber
-                if not (cell1 < cell2 or (cell1 == cell2 and chamber1 < chamber2)):
-                    temp = (cell1,chamber1)
-                    (cell1, chamber1) = (cell2, chamber2)
-                    (cell2, chamber2) = temp
 
+                
+                assert(cell1 < cell2 or (cell1 == cell2 and chamber1 < chamber2)
+                
                 new_tag = 'HP:{},{}:{},{}'.format(cell1,chamber1,cell2,chamber2)
                 new_tags.append(new_tag)
 

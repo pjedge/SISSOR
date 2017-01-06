@@ -491,7 +491,7 @@ def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_
 # cutoff is the minimum probability of an allele call to use it
 # result outfile simply contains the counts of match vs mismatched alleles
 # mismatch_outfile prints locations of mismatched allele calls
-def accuracy_count_strand_pairing(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_file, HG19, region, cutoff, counts_pickle_file, mismatch_outfile): #WGS_VCF_file,
+def accuracy_count_strand_pairing(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_file, HG19, region, cutoff, counts_pickle_file, mismatch_outfile, same_cell_only=False): #WGS_VCF_file,
 
     dp_pat = re.compile("DP=(\d+)")
     qr_pat = re.compile(";QR=(\d+)")
@@ -751,13 +751,17 @@ def accuracy_count_strand_pairing(chamber_call_file, GFF_file, WGS_VCF_file, CGI
                     chamber1 = int(chamber1)
                     cell2 = int(cell2)
                     chamber2 = int(chamber2)
+                    
+                    if cell1 != cell2 and same_cell_only:
+                        continue
+                    
                     haplotype_pairs.append(((cell1,chamber1),(cell2,chamber2)))
                     
             for (cell1,chamber1),(cell2,chamber2) in haplotype_pairs:
                 
                 if call_dict[(cell1,chamber1)] == call_dict[(cell2,chamber2)]:
                     
-                    alleles.append(call_dict[(cell1,chamber1)])
+                    alleles = alleles.union(call_dict[(cell1,chamber1)])
                 
 
             if len(alleles) == 0:
@@ -816,12 +820,13 @@ def accuracy_aggregate(counts_pickle_files, result_outfile):
         if cutoff == None:
             cutoff = cutoff0
 
+
     #description = '''POSTERIOR CUTOFF is the cutoff used for the posterior probability
-    #of a positions genotype as computed by sissorhands tool.
+    #that an allele is present as computed by sissorhands tool.
     #CALLS ABOVE CUTOFF refers to the total number of
     #positions (ref or variant) called using sissorhands base caller above the cutoff.
     #HAVE TRUTH is the number of positions (including ref calls) above the cutoff that overlap the truth dataset
-    #we are comparing against (combination of PGP1 WGS data and CGI data)
+    #we are comparing against (PGP1 CGI data)
     #MISMATCH refers to positions that had known SNPs in our truth dataset and
     #sissorhands called an allele that did not match a known allele (i.e. one allele of
     #a heterozygous or the single allele of a homozygous. For positions seen as a single
@@ -832,23 +837,6 @@ def accuracy_aggregate(counts_pickle_files, result_outfile):
     #and it is a known SNV (in truth dataset). SNV MISMATCH counts those that are not known SNVs.
     #The SNV FDR is the SNP false discovery rate, snv_mismatch / (snv_mismatch + snv_match)
     #'''
-
-    description = '''POSTERIOR CUTOFF is the cutoff used for the posterior probability
-    that an allele is present as computed by sissorhands tool.
-    CALLS ABOVE CUTOFF refers to the total number of
-    positions (ref or variant) called using sissorhands base caller above the cutoff.
-    HAVE TRUTH is the number of positions (including ref calls) above the cutoff that overlap the truth dataset
-    we are comparing against (PGP1 CGI data)
-    MISMATCH refers to positions that had known SNPs in our truth dataset and
-    sissorhands called an allele that did not match a known allele (i.e. one allele of
-    a heterozygous or the single allele of a homozygous. For positions seen as a single
-    allele variant in CGI data the reference was also considered valid). The ERROR RATE is
-    the fraction of these two values, MISMATCH/(HAVE TRUTH)
-
-    The SNV MATCH counts positions where sissorhands called an snv in some chamber
-    and it is a known SNV (in truth dataset). SNV MISMATCH counts those that are not known SNVs.
-    The SNV FDR is the SNP false discovery rate, snv_mismatch / (snv_mismatch + snv_match)
-    '''
 
     error_rate = mismatch / total_known if total_known > 0 else 'N/A'
     snv_fdr    = snv_mismatch / (snv_mismatch + snv_match) if (snv_mismatch + snv_match) > 0 else 'N/A'
@@ -865,4 +853,4 @@ def accuracy_aggregate(counts_pickle_files, result_outfile):
         print("SNV MISMATCH:       {}".format(snv_mismatch),file=rof)
         print("SNV FDR:            {}".format(snv_fdr),file=rof)
         print("---------------------------",file=rof)
-        print(description)
+        #print(description)
