@@ -183,32 +183,18 @@ def annotate_paired_strands(chamber_call_file, fragment_assignment_file, output_
     with open(chamber_call_file,'r') as ccf, open(output_file,'w') as opf:
         #print('chr\tpos\tsissor_call\tCGI_allele\tref',file=mof)
 
-        snp_ix = -1
-        prev_ccf_chrom = None
         for line in ccf:
             ccf_line = line.strip().split('\t')
             ccf_chrom = ccf_line[0]
-
-            if ccf_chrom != prev_ccf_chrom:
-                snp_ix = -1
-            prev_ccf_chrom = ccf_chrom
-
-            snp_ix += 1
-
             ccf_pos   = int(ccf_line[1])
 
-            if paired_fragments != []:
-
-                while(chr_num[paired_fragments[0][0]] <= chr_num[ccf_chrom] or (paired_fragments[0][0] == ccf_chrom and paired_fragments[0][1] <= ccf_pos)):
-                    current_paired_fragments.append(paired_fragments.pop(0))
+            # pop info for haplotype-paired regions into the "current" list
+            while paired_fragments != [] and (chr_num[paired_fragments[0][0]] < chr_num[ccf_chrom] or (paired_fragments[0][0] == ccf_chrom and paired_fragments[0][1] <= ccf_pos)):
+                current_paired_fragments.append(paired_fragments.pop(0))
 
             # filter out paired fragments that we're past
-
-            current_paired_fragments = [
-            (chrom, start, end, cell1, chamber1, cell2, chamber2)
-            for (chrom, start, end, cell1, chamber1, cell2, chamber2) in current_paired_fragments
-            if (chrom == ccf_chrom and start <= ccf_pos and ccf_pos <= end)
-            ]
+            criteria = lambda pf: (pf[0] == ccf_chrom and pf[1] <= ccf_pos and ccf_pos <= pf[2])
+            current_paired_fragments = list(filter(criteria,current_paired_fragments))
 
             if ccf_chrom in ['chrX','chrY']:
                 continue
@@ -217,7 +203,6 @@ def annotate_paired_strands(chamber_call_file, fragment_assignment_file, output_
             new_tags = []
 
             for chrom, start, end, cell1, chamber1, cell2, chamber2 in current_paired_fragments:
-
 
                 assert(cell1 < cell2 or (cell1 == cell2 and chamber1 < chamber2))
 

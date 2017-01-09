@@ -1,7 +1,7 @@
 from collections import defaultdict
 import os
 #import sys
- 
+
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
 in1 = 'base_calling/het_vcfs/cutoff3/whole_genome.out'
@@ -13,8 +13,8 @@ in3 = 'output_dir_CCF_frag'
 
 n_cells = 3
 n_chambers = 24
-XCHAMBER = True
-MIN_BASE_PROB = 0.9 #MIN_Q    = 30
+XCHAMBER = False
+MIN_BASE_PROB = 0.75 #MIN_Q    = 30
 MIN_COV  = 4
 
 chroms = ['chr{}'.format(x) for x in range(1,23)] + ['chrX','chrY']
@@ -56,13 +56,13 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file, variant_vcf_files, frag
     for i in range(0,n_cells*n_chambers):
         bfile = fragment_boundary_files[i]
         fragment_boundaries.append(parse_bedfile(bfile))
-    
+
     snp_indices = dict() # chrom -> list of snp indices
 
     for variant_vcf_file in variant_vcf_files:
         ix_counter = 0
         with open(variant_vcf_file, 'r') as infile:
-    
+
             for line in infile:
                 if (line[0] == '#' or len(line) < 2):
                     continue
@@ -84,21 +84,21 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file, variant_vcf_files, frag
             ccf_line = line.strip().split('\t')
             ccf_chrom = ccf_line[0]
             assert(ccf_chrom in chrom_names)
-            
+
             ccf_pos   = int(ccf_line[1]) - 1
-                        
+
             snp_ix, ref_allele2, variant_allele = snp_indices[(ccf_chrom, ccf_pos)]
-            
+
             ref_allele = {ccf_line[2]}
-            
+
             assert({ref_allele2} == ref_allele)
-            
+
 
             if ccf_chrom in ['chrX','chrY']:
                 continue
 
             tags = ccf_line[80].split(';')
-            if 'TOO_MANY_ALLELES' in tags or 'TOO_MANY_CHAMBERS' in tags or 'ADJACENT_INDEL_OR_CLIP' in tags:
+            if 'TOO_MANY_CHAMBERS' in tags: # or 'TOO_MANY_ALLELES' in tags or 'ADJACENT_INDEL_OR_CLIP' in tags:
                 continue
 
             call = ccf_line[4]
@@ -164,8 +164,8 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file, variant_vcf_files, frag
                     if v > max_v:
                         max_v = v
                         max_base = k
-                        
-                
+
+
                 if len(pileup) < MIN_COV:
                     continue
 
@@ -191,11 +191,11 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file, variant_vcf_files, frag
                     if prob > max_prob:
                         max_prob = prob
                         max_allele = allele
-                
+
                 if (len(max_allele) == 1 and max_allele != {max_base}):
                     print(line,end='')
                     continue
-                
+
                 if max_prob < MIN_BASE_PROB:
                     continue
 
@@ -210,7 +210,7 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file, variant_vcf_files, frag
                 #if p_err < 1e-10:
                 #    p_err = 1e-10
                 #qual = int(-10 * log10(p_err))
-                
+
                 q_char = '5' # q_char = '~' if qual>=93 else chr(33 + qual)
 
                 fragment_list[i][-1].append((snp_ix, ccf_chrom, ccf_pos, binary_allele, q_char, frg_start, frg_end, cell, ch_num))
