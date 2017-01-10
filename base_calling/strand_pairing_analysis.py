@@ -11,8 +11,10 @@ sys.path.append('../haplotyping')
 import fragment
 import sys
 from math import log10
+from collections import defaultdict
 from itertools import combinations
-
+from copy import copy
+from DJSF import Union, Find, Node #MakeSet
 # OBJECTIVE:
 # pair haplotype strands and determine three classes
 # SPSC = SAME PARENT SAME CELL
@@ -67,14 +69,6 @@ CUTOFF = 0.99
 
 def overlap(f1, f2, amt=3):
 
-    if f1.seq[0][0] > f2.seq[0][0]:
-
-        temp = f1
-        f1 = f2
-        f2 = temp
-
-    assert(f1.seq[0][0] <= f2.seq[0][0])
-
     s1 = set([a[0] for a in f1.seq])
     s2 = set([a[0] for a in f2.seq])
 
@@ -119,44 +113,151 @@ def overlap(f1, f2, amt=3):
     else:
         return None, None
 
+
 cell_map = {'PGP1_21':0,'PGP1_22':1,'PGP1_A1':2}
 
 def assign_fragments(flist, outputfile):#hapblocks):
 
     total = 0
+    paired_fragments = []
+    
+    for f1,f2 in combinations(flist, 2):
 
-    with open(outputfile, 'w') as opf:
-        for f1,f2 in combinations(flist, 2):
 
-            start, end = overlap(f1,f2,4)
+        if f1.seq[0][0] > f2.seq[0][0]:
+    
+            temp = f1
+            f1 = f2
+            f2 = temp
+    
+        assert(f1.seq[0][0] <= f2.seq[0][0])
 
-            if start == None:
+        start_SNP, end_SNP = overlap(f1,f2,3)
+
+        if start_SNP == None:
+            continue
+        
+        el1 = f1.name.split(':')
+        chrom = el1[0]
+        start1, end1 = [int(x) for x in el1[-1].split('-')]
+        cell1 = cell_map[el1[2]]
+        chamber1 = el1[3]
+        assert(chamber1[0:2] == 'CH')
+        chamber1 = int(chamber1[2:]) - 1
+
+        el2 = f2.name.split(':')
+        start2, end2 = [int(x) for x in el2[-1].split('-')]
+        cell2 = cell_map[el2[2]]
+        chamber2 = el2[3]
+        assert(chamber2[0:2] == 'CH')
+        chamber2 = int(chamber2[2:]) - 1
+        
+        end = end1
+        start = start2
+        
+        total += end - start
+
+            # order the pairs in increasing cell, chamber
+        if not (cell1 < cell2 or (cell1 == cell2 and chamber1 < chamber2)):
+            temp = (cell1,chamber1)
+            (cell1, chamber1) = (cell2, chamber2)
+            (cell2, chamber2) = temp
+        
+        paired_fragments.append((chrom, start, end, cell1, chamber1, cell2, chamber2))   
+
+    paired_fragments.sort(key=lambda x: (chr_num[x[0]],x[1]))
+    
+    filter_inconsistent_haplotypes = False
+    
+    if filter_inconsistent_haplotypes:
+        
+        paired_fragments_copy = copy(paired_fragments)
+        current_paired_fragments = []
+        firstpos = min([x[1] for x in paired_fragments])
+        lastpos = max([x[2] for x in paired_fragments])
+        chrom = paired_fragments[0][0]
+        bad_fragments = set()
+    
+        for pos in range(firstpos, lastpos+1):
+            if pos % 1000000 == 0:
+                print('{} Mb...'.format(int(pos/1000000)))
+            num_popped = 0
+            while paired_fragments != [] and (chr_num[paired_fragments[0][0]] < chr_num[chrom] or (paired_fragments[0][0] == chrom and paired_fragments[0][1] <= pos)):
+                current_paired_fragments.append(paired_fragments.pop(0))
+                num_popped += 1
+            
+            l1 = len(current_paired_fragments)
+            # filter out paired fragments that we're past
+            criteria = lambda pf: (pf[0] == chrom and pf[1] <= pos and pos <= pf[2])
+            current_paired_fragments = list(filter(criteria,current_paired_fragments))
+            l2 = len(current_paired_fragments)
+    
+            num_removed = l1 - l2
+            
+            if num_popped == 0 and num_removed == 0:
                 continue
+            
+            # we'll determine if haplotype configuration is possible using a disjoint-set-forest
+            # make a dictionary to be able to find our disjoint-set-forest nodes
+            nodedict = dict()
+            elements = [(x[3],x[4]) for x in current_paired_fragments] + [(x[5],x[6]) for x in current_paired_fragments] 
+            for element in elements:
+                nodedict[element] = Node(element)
+            
+            # union together paired fragments, saying "we know these are same haplotype"
+            for (chrom, start, end, cell1, chamber1, cell2, chamber2) in current_paired_fragments:
+                Union(nodedict[(cell1,chamber1)],nodedict[(cell2,chamber2)])
+                        
+            # parentdict has an arbitrary key, and the value is a set of same-haplotype elements                    
+            parentdict = defaultdict(set)        
+            for v in nodedict.values():
+                parentdict[Find(v).label].add(v.label)
+                
+            # traverse our haplotype sets and determine if any of them are fishy
+            # e.g. three strands from the same haplotype in the same cell
+            failed = False
+            fail_cell = None
+            for hapset in parentdict.values():
+                
+                cellcounter = defaultdict(int)
+                for cell,chamber in hapset:
+                    cellcounter[cell] += 1
+                    
+                if cellcounter[cell] > 2:
+                    fail_cell = cell
+                    failed = True
+                    break
+                    
+            if failed:
+                print("FAILURE at {} {}: cell {} has more than >=3 strands same haplotype".format(chrom, pos, fail_cell))
+                print("haplotype sets:")
+                for hapset in parentdict.values():
+                    print(hapset)
+                print("bad_fragment pairs:")
+                for frag in current_paired_fragments:
+                    print(frag)
+                print("----------------------------------------")
+                bad_fragments = bad_fragments.union(set(current_paired_fragments))
+                               
+        filtered_paired_fragments = list(set(paired_fragments_copy) - bad_fragments)
+        filtered_paired_fragments.sort(key=lambda x: (chr_num[x[0]],x[1]))
+    else:
 
-            total += end - start
-
-            el1 = f1.name.split(':')
-            chrom = el1[0]
-            cell1 = cell_map[el1[2]]
-            chamber1 = el1[3]
-            assert(chamber1[0:2] == 'CH')
-            chamber1 = int(chamber1[2:]) - 1
-
-            el2 = f2.name.split(':')
-            cell2 = cell_map[el2[2]]
-            chamber2 = el2[3]
-            assert(chamber2[0:2] == 'CH')
-            chamber2 = int(chamber2[2:]) - 1
-
-                # order the pairs in increasing cell, chamber
-            if not (cell1 < cell2 or (cell1 == cell2 and chamber1 < chamber2)):
-                temp = (cell1,chamber1)
-                (cell1, chamber1) = (cell2, chamber2)
-                (cell2, chamber2) = temp
-
+        filtered_paired_fragments = paired_fragments
+        
+    total_filtered = 0
+    
+    with open(outputfile, 'w') as opf:
+   
+        for (chrom, start, end, cell1, chamber1, cell2, chamber2) in filtered_paired_fragments:
+            total_filtered += end - start
             print('{}\t{}\t{}\t{}\t{}\t{}\t{}'.format(chrom, start, end, cell1, chamber1, cell2, chamber2), file=opf)
 
-    print(total)
+    print("TOTAL          : {}".format(total))
+    if filter_inconsistent_haplotypes:
+        print("TOTAL, FILTERED: {}".format(total_filtered))
+
+    return total
 
 
 def annotate_paired_strands(chamber_call_file, fragment_assignment_file, output_file):
@@ -226,7 +327,25 @@ def pair_strands(fragmentfile, vcf_file, outputfile):
     flist = fragment.read_fragment_matrix(fragmentfile,vcf_file)
 
     # ASSIGN FRAGMENTS TO HAPLOTYPES
-    flist = assign_fragments(flist, outputfile)
+    total = assign_fragments(flist, outputfile)
+    
+    return total
+
+def test_pair_strands():
+    #chroms = ['chr{}'.format(x) for x in range(1,23)]
+    chroms = ['chr20']
+
+    TOTAL = 0
+    
+    for chrom in chroms:
+        fragmentfile = '../haplotyping/sissor_project/data/PGP1_ALL/fragmat/cov1_basic/{}'.format(chrom)
+        vcf_file = '../haplotyping/sissor_project/data/PGP1_VCFs_BACindex/{}.vcf'.format(chrom)
+        outputfile = 'strand_pairs_new/{}'.format(chrom)
+        total = pair_strands(fragmentfile, vcf_file, outputfile)
+        TOTAL += total
+        
+    print(TOTAL)
 
 if __name__ == '__main__':
-    pair_strands()
+    test_pair_strands()
+    #pair_strands()

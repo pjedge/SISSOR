@@ -724,67 +724,37 @@ def accuracy_count_strand_pairing(chamber_call_file, GFF_file, WGS_VCF_file, CGI
 
             call_dict = dict()
 
-            if cutoff != None:
-                for i, call in enumerate(base_call_list):
+            for i, call in enumerate(base_call_list):
 
-                    cell = int(i / n_chambers)
-                    chamber = int(i % n_chambers)
+                cell = int(i / n_chambers)
+                chamber = int(i % n_chambers)
 
-                    if call == '*':
-                        continue
+                if call == '*':
+                    continue
 
-                    xchamber_calls, basic_calls, pileup = call.split('|')
+                xchamber_calls, basic_calls, pileup = call.split('|')
 
-                    el2 = xchamber_calls.split(';')
+                el2 = xchamber_calls.split(';')
 
-                    max_prob = -1
-                    max_allele = 'N'
-                    for entry in el2:
+                max_prob = -1
+                max_allele = 'N'
+                for entry in el2:
 
-                        a_info, prob = entry.split(':')
-                        prob = float(prob)
+                    a_info, prob = entry.split(':')
+                    prob = float(prob)
 
-                        if len(a_info) == 1:
-                            allele = {a_info}
-                        elif len(a_info) == 2:
-                            allele = {a_info[0],a_info[1]}
+                    if len(a_info) == 1:
+                        allele = {a_info}
+                    elif len(a_info) == 2:
+                        allele = {a_info[0],a_info[1]}
 
-                        if prob > max_prob:
-                            max_prob = prob
-                            max_allele = allele
+                    if prob > max_prob:
+                        max_prob = prob
+                        max_allele = allele
 
-                    if len(max_allele) == 1 and max_prob > cutoff:
-                        call_dict[(cell,chamber)] = max_allele
-            else: # if cutoff is none we just say the call is the most numerous base
-                for i, call in enumerate(base_call_list):
+                if len(max_allele) == 1 and max_prob > cutoff:
+                    call_dict[(cell,chamber)] = max_allele
 
-                    cell = int(i / n_chambers)
-                    chamber = int(i % n_chambers)
-
-                    if call == '*':
-                        continue
-
-                    xchamber_calls, basic_calls, pileup = call.split('|')
-
-                    basecounts = defaultdict(int)
-                    for base in pileup:
-                        basecounts[base] += 1
-
-                    max_k = 'N'
-                    max_v = -1
-                    for k,v in basecounts.items():
-                        if v > max_v:
-                            max_v = v
-                            max_k = k
-
-                    tie = False
-                    for k,v in basecounts.items():
-                        if v == max_v and k != max_k:
-                            tie = True
-                            break
-
-                    if not tie:
-                        call_dict[(cell,chamber)] = {max_k}
 
             haplotype_pairs = []
             for tag in tags:
