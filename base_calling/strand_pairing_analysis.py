@@ -47,6 +47,8 @@ n_cells = 3
 
 THRESHOLD = 0.9 # fraction of match to say haplotype is the same
 filter_inconsistent_haplotypes = False
+OVERLAP1 = 3
+OVERLAP2 = 3
 
 
 chroms = ['chr{}'.format(i) for i in range(1,23)] + ['chrX','chrY']
@@ -73,15 +75,18 @@ def addlogs(a,b):
 
 
 
-def overlap(f1, f2, amt, haplotype_dict=None):
+def overlap(f1, f2, haplotype_dict=None):
     
+    assert(f1.seq[0][0] <= f2.seq[0][0])
+    assert(f1.seq[0][1] <= f2.seq[0][1])
+
     if haplotype_dict == None:
         s1 = set([a[0] for a in f1.seq])
         s2 = set([a[0] for a in f2.seq])
     
         inter = set.intersection(s1,s2)
     
-        if len(inter) < amt:
+        if len(inter) < OVERLAP1:
             return None, None
     
         inter_seq1 = [x for x in f1.seq if x[0] in inter]
@@ -121,6 +126,7 @@ def overlap(f1, f2, amt, haplotype_dict=None):
             return None, None
             
     else:
+    
         el1 = f1.name.split(':')
         start1, end1 = [int(x) for x in el1[-1].split('-')]
 
@@ -128,7 +134,10 @@ def overlap(f1, f2, amt, haplotype_dict=None):
         el2 = f2.name.split(':')
         start2, end2 = [int(x) for x in el2[-1].split('-')]
         
-        end = end1
+        if start2 >= end1:
+            return None, None
+        
+        end = min([end1,end2])
         start = start2
 
         s1 = [a for a in f1.seq if a[1] > start and a[1] < end]
@@ -155,7 +164,7 @@ def overlap(f1, f2, amt, haplotype_dict=None):
         #    print(total1,end=' ')
         #    print(total2)        
         
-        if total1 < amt or total2 < amt:
+        if total1 < OVERLAP2 or total2 < OVERLAP2:
             return None, None
 
         if (match1/total1 > THRESHOLD and match2/total2 > THRESHOLD) or (1-(match1/total1) > THRESHOLD and 1-(match2/total2) > THRESHOLD):#post_samehap > CUTOFF:
@@ -194,8 +203,9 @@ def assign_fragments(flist, outputfile, haplotype_file=None):#hapblocks):
             f2 = temp
     
         assert(f1.seq[0][0] <= f2.seq[0][0])
+        assert(f1.seq[0][1] <= f2.seq[0][1])
 
-        start_SNP, end_SNP = overlap(f1,f2,4, haplotype_dict)
+        start_SNP, end_SNP = overlap(f1,f2, haplotype_dict)
 
         if start_SNP == None:
             continue
@@ -215,7 +225,7 @@ def assign_fragments(flist, outputfile, haplotype_file=None):#hapblocks):
         assert(chamber2[0:2] == 'CH')
         chamber2 = int(chamber2[2:]) - 1
         
-        end = end1
+        end = min([end1,end2])
         start = start2
         
         total += end - start
@@ -239,7 +249,8 @@ def assign_fragments(flist, outputfile, haplotype_file=None):#hapblocks):
         lastpos = max([x[2] for x in paired_fragments])
         chrom = paired_fragments[0][0]
         bad_fragments = set()
-    
+        failed = False
+        fail_positions = []
         for pos in range(firstpos, lastpos+1):
             if pos % 1000000 == 0:
                 print('{} Mb...'.format(int(pos/1000000)))
@@ -257,6 +268,8 @@ def assign_fragments(flist, outputfile, haplotype_file=None):#hapblocks):
             num_removed = l1 - l2
             
             if num_popped == 0 and num_removed == 0:
+                if failed == True:
+                    fail_positions.append(pos)
                 continue
             
             # we'll determine if haplotype configuration is possible using a disjoint-set-forest
@@ -303,6 +316,8 @@ def assign_fragments(flist, outputfile, haplotype_file=None):#hapblocks):
                                
         filtered_paired_fragments = list(set(paired_fragments_copy) - bad_fragments)
         filtered_paired_fragments.sort(key=lambda x: (chr_num[x[0]],x[1]))
+        import pickle
+        pickle.dump(fail_positions,open('fail_positions.p','wb'))
     else:
 
         filtered_paired_fragments = paired_fragments
