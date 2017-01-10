@@ -10,6 +10,7 @@ sys.path.append('../haplotyping')
 #import fileIO
 import fragment
 import sys
+import fileIO
 from math import log10
 from collections import defaultdict
 from itertools import combinations
@@ -44,6 +45,10 @@ tinylog = -1e5
 n_chambers = 24
 n_cells = 3
 
+THRESHOLD = 0.9 # fraction of match to say haplotype is the same
+filter_inconsistent_haplotypes = False
+
+
 chroms = ['chr{}'.format(i) for i in range(1,23)] + ['chrX','chrY']
 
 chr_num = dict()
@@ -65,61 +70,119 @@ def addlogs(a,b):
     else:
         return b + log10(1 + pow(10, a - b))
 
-CUTOFF = 0.99
-
-def overlap(f1, f2, amt=3):
-
-    s1 = set([a[0] for a in f1.seq])
-    s2 = set([a[0] for a in f2.seq])
-
-    inter = set.intersection(s1,s2)
-
-    if len(inter) < amt:
-        return None, None
-
-    inter_seq1 = [x for x in f1.seq if x[0] in inter]
-    inter_seq2 = [x for x in f2.seq if x[0] in inter]
-
-    gpos = [x[1] for x in inter_seq1]
-    start = min(gpos)
-    end   = max(gpos)
-
-    p_samehap = 0
-    p_diffhap = 0
-    total = 0
-    matches = 0
-    for (snp_ix1, gen_ix1, a1, q1), (snp_ix2, gen_ix2, a2, q2) in zip(inter_seq1, inter_seq2):
 
 
-        q1 = 10**((ord(q1)-33)/-10)
-        q2 = 10**((ord(q2)-33)/-10)
 
-        total += 1
-        if a1 == a2:
-            matches += 1
-            p_samehap += log10((1-q1)*(1-q2)+q1*q2)
-            p_diffhap += log10((1-q1)*q2+(1-q2)*q1)
+def overlap(f1, f2, amt, haplotype_dict=None):
+    
+    if haplotype_dict == None:
+        s1 = set([a[0] for a in f1.seq])
+        s2 = set([a[0] for a in f2.seq])
+    
+        inter = set.intersection(s1,s2)
+    
+        if len(inter) < amt:
+            return None, None
+    
+        inter_seq1 = [x for x in f1.seq if x[0] in inter]
+        inter_seq2 = [x for x in f2.seq if x[0] in inter]
+    
+        gpos = [x[1] for x in inter_seq1]
+        start = min(gpos)
+        end   = max(gpos)
+    
+        p_samehap = 0
+        p_diffhap = 0
+        total = 0
+        matches = 0
+        for (snp_ix1, gen_ix1, a1, q1), (snp_ix2, gen_ix2, a2, q2) in zip(inter_seq1, inter_seq2):
+    
+    
+            q1 = 10**((ord(q1)-33)/-10)
+            q2 = 10**((ord(q2)-33)/-10)
+    
+            total += 1
+            if a1 == a2:
+                matches += 1
+                p_samehap += log10((1-q1)*(1-q2)+q1*q2)
+                p_diffhap += log10((1-q1)*q2+(1-q2)*q1)
+            else:
+                p_diffhap += log10((1-q1)*(1-q2)+q1*q2)
+                p_samehap += log10((1-q1)*q2+(1-q2)*q1)
+    
+        #post_samehap = 10**(p_samehap - addlogs(p_samehap, p_diffhap))
+        #print("{} {} {}".format(matches, total, post_samehap))
+    
+        if matches/total > THRESHOLD:#post_samehap > CUTOFF:
+    
+            return start, end
+    
         else:
-            p_diffhap += log10((1-q1)*(1-q2)+q1*q2)
-            p_samehap += log10((1-q1)*q2+(1-q2)*q1)
-
-    #post_samehap = 10**(p_samehap - addlogs(p_samehap, p_diffhap))
-    #print("{} {} {}".format(matches, total, post_samehap))
-
-    if matches/total > 0.8:#post_samehap > CUTOFF:
-
-        return start, end
-
+            return None, None
+            
     else:
-        return None, None
+        el1 = f1.name.split(':')
+        start1, end1 = [int(x) for x in el1[-1].split('-')]
 
+
+        el2 = f2.name.split(':')
+        start2, end2 = [int(x) for x in el2[-1].split('-')]
+        
+        end = end1
+        start = start2
+
+        s1 = [a for a in f1.seq if a[1] > start and a[1] < end]
+        s2 = [a for a in f2.seq if a[1] > start and a[1] < end]
+        match1 = 0
+        total1 = 0
+        match2 = 0
+        total2 = 0
+        for (snp_ix, gen_ix, a, q) in s1:
+            if haplotype_dict[gen_ix] not in ['0','1'] or a not in ['0','1']:
+                continue
+            if haplotype_dict[gen_ix] == a:
+                match1 += 1
+            total1 += 1
+
+        for (snp_ix, gen_ix, a, q) in s2:
+            if haplotype_dict[gen_ix] not in ['0','1'] or a not in ['0','1']:
+                continue
+            if haplotype_dict[gen_ix] == a:
+                match2 += 1
+            total2 += 1
+        
+        #if total1 != 0 and total2 != 0:
+        #    print(total1,end=' ')
+        #    print(total2)        
+        
+        if total1 < amt or total2 < amt:
+            return None, None
+
+        if (match1/total1 > THRESHOLD and match2/total2 > THRESHOLD) or (1-(match1/total1) > THRESHOLD and 1-(match2/total2) > THRESHOLD):#post_samehap > CUTOFF:
+    
+            return start, end
+    
+        else:
+            return None, None
+
+        
 
 cell_map = {'PGP1_21':0,'PGP1_22':1,'PGP1_A1':2}
 
-def assign_fragments(flist, outputfile):#hapblocks):
+def assign_fragments(flist, outputfile, haplotype_file=None):#hapblocks):
 
     total = 0
     paired_fragments = []
+    
+     # convert t_block to a dict for convenience
+    haplotype_dict = None
+    if haplotype_file != None:
+        haplotype_dict = defaultdict(lambda: '-')
+        t_blocklist = fileIO.parse_hapblock_file(haplotype_file,use_SNP_index=False)
+        for t_block in t_blocklist:
+            for i, a1, a2 in t_block:
+                haplotype_dict[i] = a1 # index by genomic pos (1-indexed), return one haplotype
+        
     
     for f1,f2 in combinations(flist, 2):
 
@@ -132,7 +195,7 @@ def assign_fragments(flist, outputfile):#hapblocks):
     
         assert(f1.seq[0][0] <= f2.seq[0][0])
 
-        start_SNP, end_SNP = overlap(f1,f2,3)
+        start_SNP, end_SNP = overlap(f1,f2,4, haplotype_dict)
 
         if start_SNP == None:
             continue
@@ -167,7 +230,6 @@ def assign_fragments(flist, outputfile):#hapblocks):
 
     paired_fragments.sort(key=lambda x: (chr_num[x[0]],x[1]))
     
-    filter_inconsistent_haplotypes = False
     
     if filter_inconsistent_haplotypes:
         
@@ -229,7 +291,7 @@ def assign_fragments(flist, outputfile):#hapblocks):
                     break
                     
             if failed:
-                print("FAILURE at {} {}: cell {} has more than >=3 strands same haplotype".format(chrom, pos, fail_cell))
+                print("FAILURE at {} {}: cell {} has >=3 strands same haplotype.".format(chrom, pos, fail_cell))
                 print("haplotype sets:")
                 for hapset in parentdict.values():
                     print(hapset)
@@ -319,7 +381,7 @@ def annotate_paired_strands(chamber_call_file, fragment_assignment_file, output_
             new_line = '\t'.join(ccf_line)
             print(new_line, file=opf)
 
-def pair_strands(fragmentfile, vcf_file, outputfile):
+def pair_strands(fragmentfile, vcf_file, outputfile, haplotype_file):
 
     # READ HAPLOTYPE BLOCKS
 
@@ -327,7 +389,7 @@ def pair_strands(fragmentfile, vcf_file, outputfile):
     flist = fragment.read_fragment_matrix(fragmentfile,vcf_file)
 
     # ASSIGN FRAGMENTS TO HAPLOTYPES
-    total = assign_fragments(flist, outputfile)
+    total = assign_fragments(flist, outputfile, haplotype_file)
     
     return total
 
@@ -341,7 +403,8 @@ def test_pair_strands():
         fragmentfile = '../haplotyping/sissor_project/data/PGP1_ALL/fragmat/cov1_basic/{}'.format(chrom)
         vcf_file = '../haplotyping/sissor_project/data/PGP1_VCFs_BACindex/{}.vcf'.format(chrom)
         outputfile = 'strand_pairs_new/{}'.format(chrom)
-        total = pair_strands(fragmentfile, vcf_file, outputfile)
+        haplotype_file = '../haplotyping/sissor_project/experiments/hapcut2_PGP1_ALL/cov1_basic/{}.output'.format(chrom)
+        total = pair_strands(fragmentfile, vcf_file, outputfile, haplotype_file)
         TOTAL += total
         
     print(TOTAL)
