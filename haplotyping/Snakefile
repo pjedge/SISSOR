@@ -26,6 +26,7 @@ from fix_chamber_contamination import fix_chamber_contamination
 import pickle
 from collections import defaultdict
 from plot_sissor import plot_sissor
+from itertools import product
 
 # qsub stderr and stdout directories are not automatically created by snakemake!
 if not os.path.exists(config['qsub_stdout_dir']):
@@ -84,10 +85,8 @@ SISSOR_vcf_dir = 'sissor_project/data/PGP1_VCFs_SISSORindex'
 BAC_vcf_dir = 'sissor_project/data/PGP1_VCFs_BACindex'
 rule all:
     input:
-        #expand("sissor_project/data/BAC/{c}.filtered",c=['chr20'])
         expand("{P}/sissor_haplotype_error_chromosome.png",P=config['plots_dir']),
         expand("{P}/sissor_haplotype_error_genome.png",P=config['plots_dir']),
-        #expand("{d}/{s}/fixed_beds/ch{ch}.bed",d=data_dir,s=cells,ch=chambers)
 
 # PLOT RESULTS
 rule plot_hapcut2_results:
@@ -155,7 +154,7 @@ rule prune_haplotype:
         hapblocks = expand("{E}/hapcut2_{{s}}/{{x}}/{c}.output",E=experiments_dir,c=chroms)
     run:
         for i, o in zip(input.hapblocks,output.hapblocks):
-            fileIO.prune_hapblock_file(i, o, snp_conf_cutoff=0.95, split_conf_cutoff=0.5, use_refhap_heuristic=True) #split_conf_cutoff=0.9999
+            fileIO.prune_hapblock_file(i, o, snp_conf_cutoff=0.95, split_conf_cutoff=-1, use_refhap_heuristic=True) #split_conf_cutoff=0.9999
 
 # RUN HAPCUT2
 rule run_hapcut2:
@@ -203,7 +202,7 @@ rule generate_fragmatrix:
     params: job_name = 'generate_fragmatrix'
     input:  ccf      = 'sissor_project/data/PGP1_ALL.het.whole_genome.ccf',
             vcfs     = expand('{v}/{c}.vcf',v=BAC_vcf_dir,c=chroms),
-            bounds   = expand('sissor_project/data/eric_fragment_boundary_beds/{ce}/ch{ch}.bed',ce=cells,ch=chambers),
+            bounds   = expand('sissor_project/data/eric_fragment_boundary_beds/{P[0]}/ch{P[1]}.bed',P=product(cells,chambers)),
     output: fragmat  = expand('sissor_project/data/PGP1_ALL/augmented_fragmat/{c}',c=chroms),
 
     run:

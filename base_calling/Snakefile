@@ -6,8 +6,9 @@ import fix_sam
 import chamber_allele_call_accuracy as caca
 import base_calls_to_vcf
 import strand_pairing_analysis
+from itertools import product
 
-localrules: all, simlinks
+localrules: all, simlinks, pileup_test
 
 # cutoff values are coded as 1.0-10**(-1*x)
 # so 3 => 0.999
@@ -58,17 +59,14 @@ for chrom, chrlen in hg19_size_list:
 
 regions = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in chunklist]
 #regions = ['chr6.135000001.140000000']
+cells = ['PGP1_21','PGP1_22','PGP1_A1']
+chambers = list(range(1,25))
 
 rule all:
     input:
-        #expand('het_vcfs/cutoff{cut}/whole_genome.vcf',cut=het_vcf_cutoffs)
-        #'accuracy_reports/new/split/chr2.145000001.150000000/7/mismatches'
         expand('accuracy_reports/unpaired/cutoff{cut}.results',cut=cutoffs),
-        expand('accuracy_reports/paired_same_cell/cutoff{cut}.results',cut=paired_cutoffs),
-        expand('accuracy_reports/paired_all_cells/cutoff{cut}.results',cut=paired_cutoffs),
-        #expand('base_calls/unpaired_paired/{r}.out',r=regions),
-        #'strand_pairs/all',
-        #'parameters/MDA_dist.p'
+        #expand('accuracy_reports/paired_same_cell/cutoff{cut}.results',cut=paired_cutoffs),
+        #expand('accuracy_reports/paired_all_cells/cutoff{cut}.results',cut=paired_cutoffs),
 
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
@@ -214,12 +212,11 @@ rule download_GMS:
         wget http://labshare.cshl.edu/shares/schatzlab/www-data/darkmatter/by_tech/hg19_illumina/{wildcards.chr}.gms.gz -O {output}.gz
         gunzip {output}.gz
         '''
-'''
 
 rule call_alleles:
     params: job_name = 'call_alleles.{r}'
     input:  pileup = 'pileups/split/{r}.pileup',
-            #boundary_files = expand('fragment_boundary_beds/{ce}/ch{ch}.bed',ce=cells,ch=chambers),
+            #boundary_files = expand('fragment_boundary_beds/{P[0]}/ch{P[1]}.bed',P=product(cells, chambers)),
             MDA_dist = 'parameters/MDA_dist.p',
             cov_frac_dist = 'parameters/cov_frac_dist.p',
             p_null = 'parameters/p_null.p',
@@ -259,7 +256,7 @@ rule estimate_parameters:
 rule obtain_counts_parallel:
     params: job_name = 'obtain_counts_parallel.{r}'
     input:  pileup = 'pileups/split/{r}.pileup',
-            #boundary_files = expand('fragment_boundary_beds/{ce}/ch{ch}.bed',ce=cells,ch=chambers)
+            #boundary_files = expand('fragment_boundary_beds/{P[0]}/ch{P[1]}.bed',P=product(cells, chambers))
     output: 'parameters/split/chrX_MDA_fracs.{r}.p',
             'parameters/split/chrX_covs.{r}.p',
             'parameters/split/chamber_position_counts.{r}.p',
@@ -273,11 +270,11 @@ rule pileup:
             chrom = lambda wildcards: wildcards.r.split('.')[0],
             start = lambda wildcards: wildcards.r.split('.')[1],
             stop  = lambda wildcards: wildcards.r.split('.')[2]
-    input:  bams = expand('bams/{ce}/ch{ch}.bam',ce=cells,ch=chambers),
-            bais = expand('bams/{ce}/ch{ch}.bam.bai',ce=cells,ch=chambers)
+    input:  bams = expand('bams/{P[0]}/ch{P[1]}.bam',P=product(cells, chambers)),
+            bais = expand('bams/{P[0]}/ch{P[1]}.bam.bai',P=product(cells, chambers))
     output: pileup = 'pileups/split/{r}.pileup'
     shell:  '{SAMTOOLS} mpileup --region {params.chrom}:{params.start}-{params.stop} --adjust-MQ 50 --max-depth 100 --output-MQ --min-MQ 30 --min-BQ 20 --fasta-ref {HG19} --output {output.pileup} {input.bams}'
-'''
+
 rule index_bam:
     params: job_name = 'index_bam{ce}.{ch}'
     input:  bam = 'bams/{ce}/ch{ch}.bam'
