@@ -319,39 +319,40 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
     # estimate prior probability of genotypes using strategy described here:
     # http://www.ncbi.nlm.nih.gov/pmc/articles/PMC2694485/
     # "prior probability of each genotype"
-    genotype_priors = dict()
+    diploid_genotype_priors = dict()
+    haploid_genotype_priors = dict()
     transition = {'A':'G','G':'A','T':'C','C':'T'}
     alleles = ['A','T','G','C']
 
     for allele in alleles:
 
         # priors on haploid alleles
-        p_a = dict()
-        p_a[allele] = 1 - hom_snp_rate
-        p_a[transition[allele]] = hom_snp_rate / 6 * 4
+        haploid_genotype_priors[allele] = dict()
+        haploid_genotype_priors[allele][allele] = 1 - hom_snp_rate
+        haploid_genotype_priors[allele][transition[allele]] = hom_snp_rate / 6 * 4
         for transversion in alleles:
-            if transversion in p_a:
+            if transversion in haploid_genotype_priors[allele]:
                 continue
-            p_a[transversion] =  hom_snp_rate / 6
+            haploid_genotype_priors[allele][transversion] =  hom_snp_rate / 6
 
-        genotype_priors[allele] = dict()
+        diploid_genotype_priors[allele] = dict()
         for G in genotypes:
             g1,g2 = G
             # probability of homozygous reference is the probability of neither het or hom SNP
             if g1 == g2 and g1 == allele:
-                genotype_priors[allele][G] = 1.0 - het_snp_rate - hom_snp_rate
+                diploid_genotype_priors[allele][G] = 1.0 - het_snp_rate - hom_snp_rate
             elif g1 == g2 and g1 != allele:
                 # transitions are 4 times as likely as transversions
                 if g1 == transition[allele]:
-                    genotype_priors[allele][G] = het_snp_rate / 6 * 4
+                    diploid_genotype_priors[allele][G] = het_snp_rate / 6 * 4
                 else:
-                    genotype_priors[allele][G] = het_snp_rate / 6
+                    diploid_genotype_priors[allele][G] = het_snp_rate / 6
             else: # else it's the product of the haploid priors
-                    genotype_priors[allele][G] = p_a[g1] * p_a[g2]
+                    diploid_genotype_priors[allele][G] = haploid_genotype_priors[allele][g1] * haploid_genotype_priors[allele][g2]
 
         # convert to log
-        for G in genotype_priors[allele].keys():
-            genotype_priors[allele][G] = log10(genotype_priors[allele][G])
+        for G in diploid_genotype_priors[allele].keys():
+            diploid_genotype_priors[allele][G] = log10(diploid_genotype_priors[allele][G])
 
     # ESTIMATE PER-BASE PROBABILITY OF MDA ERROR
     # formula from this paper: http://journals.plos.org/plosone/article?id=10.1371/journal.pone.0105585
@@ -370,7 +371,8 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
     pickle.dump(ch_priors, open("parameters/ch_priors.p","wb"))
     pickle.dump(hom_config_probs, open("parameters/hom_config_probs.p","wb"))
     pickle.dump(het_config_probs, open("parameters/het_config_probs.p","wb"))
-    pickle.dump(genotype_priors, open("parameters/genotype_priors.p","wb"))
+    pickle.dump(diploid_genotype_priors, open("parameters/diploid_genotype_priors.p","wb"))
+    pickle.dump(haploid_genotype_priors, open("parameters/haploid_genotype_priors.p","wb"))
     pickle.dump(omega, open("parameters/omega.p","wb"))
 
 def obtain_counts_parallel(input_file, boundary_files=None, suffix=''):
