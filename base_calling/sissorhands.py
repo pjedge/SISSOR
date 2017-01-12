@@ -33,7 +33,7 @@ chroms = ['chr{}'.format(i) for i in range(1,23)] + ['chrX','chrY']
 n_chambers = 24
 chambers = list(range(1,n_chambers+1))
 bases = ['A','T','G','C']
-genotypes = list(itertools.combinations_with_replacement(bases,2))
+diploid_genotypes = list(itertools.combinations_with_replacement(bases,2))
 parameters_dir = 'parameters'
 n_cells = 3
 numbers = '0123456789'
@@ -41,6 +41,8 @@ base_letters = 'ACGTacgt'
 mixed_alleles = [('A',),('T',),('G',),('C',), ('A', 'T'),('A', 'G'),('A', 'C'),('T', 'G'),('T', 'C'),('G', 'C')]
 tinylog = -1e5
 INDEL_COUNT_LIMIT = 3
+hemizygous_chroms = {'chrX','X','chrY','Y'}
+haploid_genotypes = [('A',),('T',),('G',),('C')]
 
 chr_num = dict()
 for i,chrom in enumerate(chroms):
@@ -91,7 +93,9 @@ ch_priors = pickle.load(open("{}/ch_priors.p".format(parameters_dir), "rb" )) # 
 cov_frac_dist = pickle.load(open( "parameters/cov_frac_dist.p", "rb")) # PROBABILITY OF SEEING PARENT 1 ALLELE IN MIXED ALLELE CHAMBER
 hom_config_probs = pickle.load(open( "parameters/hom_config_probs.p", "rb")) # STRAND-TO-CHAMBER CONFIGURATIONS
 het_config_probs = pickle.load(open( "parameters/het_config_probs.p", "rb"))
-genotype_priors = pickle.load(open( "parameters/genotype_priors.p", "rb"))
+diploid_genotype_priors = pickle.load(open( "parameters/diploid_genotype_priors.p", "rb"))
+haploid_genotype_priors = pickle.load(open( "parameters/haploid_genotype_priors.p", "rb"))
+
 #omega = pickle.load(open( "parameters/omega.p", "rb")) # per-base probability of MDA error
 #omega_nolog = 10**omega
 
@@ -208,14 +212,14 @@ def compute_mixed_allele_priors():
         for i in range(1,5):
             for allele in mixed_alleles:
                 mixed_allele_priors[ref_allele][i][allele] = tinylog
-            for G in genotypes:
+            for G in diploid_genotypes:
                 nz = list(range(i))
                 het = (G[0] != G[1])
                 cfgs = singlecell_config(het,nz)
 
                 for (c1,c2,c3,c4), p in cfgs:
                     # probability of configuration
-                    p += genotype_priors[ref_allele][G] - log10(len({c1,c2,c3,c4}))
+                    p += diploid_genotype_priors[ref_allele][G] - log10(len({c1,c2,c3,c4}))
 
                     for j in {c1,c2,c3,c4}:
 
@@ -379,25 +383,41 @@ def precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers, fast_mode)
 # qual_data: list length 24, containing 1 list per chamber. inner list has q values (p(base call error)) callin in chamber.
 # configs:   list of configurations and their probabilities, see earlier
 
-def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, condensed_genotype_set):
+def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, condensed_genotype_set, haploid):
 
     probs = dict()
     outline_el = ['*','*'] + sum([(['CELL{}'.format(i)]+['*'] * n_chambers) for i in range(1,n_cells+1)],[])
 
     hom_het_configs = [multicell_config(False,nonzero_chambers),multicell_config(True,nonzero_chambers)]
     p_assignment = defaultdict(lambda: tinylog)
-    genotype_set = genotypes if condensed_genotype_set == None else condensed_genotype_set
+    genotype_set = diploid_genotypes if condensed_genotype_set == None else condensed_genotype_set
 
     for G in genotype_set:
         
         configs = hom_het_configs[0] if G[0] == G[1] else hom_het_configs[1]
-        #configs = hom_het_configs[1]
         p_total = tinylog
+
+        if haploid:
+            configs = hom_het_configs[1] # spoofed as heterozygous
+            if G[0] != G[1]: # only consider 
+                continue 
+            
 
         for config in configs:
 
             p = 0
             assignments = set()
+
+            if haploid:
+                skip = False
+                for i in range(0,n_cells):
+                    (c1,c2,c3,c4), p_cell_cfg = config[i]
+                    if not (c3 == n_chambers and c4 == n_chambers):
+                        skip = True
+                        break
+                        
+                if skip:
+                    continue
 
             for i in range(0,n_cells):
                 if len(nonzero_chambers[i]) == 0:
@@ -449,7 +469,7 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
 
                         # we must account for the fact that the entire consensus may
                         # be wrong due to MDA error
-                        for base1, base2 in genotypes:
+                        for base1, base2 in diploid_genotypes:
 
                             x1 = MDA_COR if base1 == allele1 else MDA_ERR
                             x2 = MDA_COR if base2 == allele2 else MDA_ERR
@@ -522,10 +542,17 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
             p_total = addlogs(p_total, p) # update genotype likelihood sum
 
             for assignment in assignments:
-                p_assignment[assignment] = addlogs(p_assignment[assignment], p + genotype_priors[ref_allele][G])
-
-        probs[G] = p_total + genotype_priors[ref_allele][G]
-
+                
+                if not haploid:
+                    p_assignment[assignment] = addlogs(p_assignment[assignment], p + diploid_genotype_priors[ref_allele][G])
+                else:
+                    p_assignment[assignment] = addlogs(p_assignment[assignment], p + haploid_genotype_priors[ref_allele][G[0]])
+                
+        
+        if not haploid:
+            probs[G] = p_total + diploid_genotype_priors[ref_allele][G]
+        else:
+            probs[(G[0],)] = p_total + haploid_genotype_priors[ref_allele][G[0]]
     # denominator for bayes rule posterior calculation
     total = tinylog
     for G,p in probs.items():
@@ -536,7 +563,9 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
     max_posterior = -1
     max_G = ('N','N')
     allele_count = defaultdict(lambda: tinylog)
-    for G in genotypes:
+    
+    current_genotypes = diploid_genotypes if not haploid else haploid_genotypes
+    for G in current_genotypes:
         if G in probs:
             for allele in bases:
                 if allele in G:
@@ -549,12 +578,12 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
         else:
             res.append((G,0.0))
 
-    if max_G != (ref_allele,ref_allele):
+    if max_G != (ref_allele,ref_allele) and max_G != (ref_allele,):
         SNP = True
 
     res2 = [(allele,10**(allele_count[allele] - total)) for allele in bases]
 
-    allele_str = ';'.join(['{0}:{1:.24f}'.format(a,p) for a,p in res2])
+    allele_str = ';'.join(['{}:{}'.format(a,p) for a,p in res2])
     gen_str = ';'.join(['{}:{}'.format(''.join(g),p) for g,p in res])
     outline_el[0] = allele_str
     outline_el[1] = gen_str
@@ -568,6 +597,8 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
             #pr_all_chamber_data(allele, ref_allele, cell, chamber, pr_one_ch, nonzero_chambers, hom_het_configs)
             probs = []
             for allele in mixed_alleles:
+                if haploid and len(allele) > 1:
+                    continue
                 prob = p_assignment[(cell,chamber,allele)] #+ mixed_allele_priors[ref_allele][num_nonzero][allele]
                 probs.append((allele,prob))
 
@@ -604,7 +635,12 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
             #pr_all_chamber_data(allele, ref_allele, cell, chamber, pr_one_ch, nonzero_chambers, hom_het_configs)
             probs = []
             for allele in mixed_alleles:
-                prob = pr_one_ch[(cell,chamber,allele)] + mixed_allele_priors[ref_allele][num_nonzero][allele]
+                if not haploid:
+                    prob = pr_one_ch[(cell,chamber,allele)] + mixed_allele_priors[ref_allele][num_nonzero][allele]
+                else:
+                    if len(allele) > 1:
+                        continue
+                    prob = pr_one_ch[(cell,chamber,allele)] + haploid_genotype_priors[ref_allele][G[0]]
                 probs.append((allele,prob))
 
             # denominator for bayes rule posterior calculation
@@ -679,6 +715,8 @@ def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only
             pos   = int(el[1]) - 1
             ref_base = str.upper(el[2])
 
+            haploid = (chrom in hemizygous_chroms)
+
             if ref_base == 'N':
                 continue
             assert(ref_base in bases)
@@ -745,7 +783,7 @@ def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only
 
 
             base_count = sorted(list(base_count.items()),key=lambda x: x[1],reverse=True)
-            major_allele = base_count[0][0]
+            #major_allele = base_count[0][0]
 
             fast_mode = False
             condensed_genotype_set = None
@@ -764,7 +802,7 @@ def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only
 
             too_many_chambers = False
             for nz in nonzero_chambers:
-                if len(nz) > 4:
+                if (not haploid and len(nz) > 4) or (haploid and len(nz) > 2):
                     too_many_chambers = True
                     tags.append('TOO_MANY_CHAMBERS')
                     break
@@ -797,7 +835,7 @@ def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only
 
                 pr_one_ch = precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers, fast_mode)
 
-                outline_el, SNP = pr_genotype(pr_one_ch, nonzero_chambers,mixed_allele_priors, ref_base, condensed_genotype_set)
+                outline_el, SNP = pr_genotype(pr_one_ch, nonzero_chambers,mixed_allele_priors, ref_base, condensed_genotype_set, haploid)
 
                 if SNP:
                     tags.append('SNP')

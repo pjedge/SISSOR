@@ -374,9 +374,6 @@ def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_
 
             tags = ccf_line[80].split(';')
 
-            if ccf_chrom == 'chrX' or ccf_chrom == 'chrY':
-                continue
-
             if 'TOO_MANY_CHAMBERS' in tags: #or 'ADJACENT_INDEL_OR_CLIP' in tags: # 'TOO_MANY_ALLELES' in tags or
                 continue
 
@@ -683,9 +680,6 @@ def accuracy_count_strand_pairing(chamber_call_file, GFF_file, WGS_VCF_file, CGI
             ref_allele = ccf_line[2]
 
             tags = ccf_line[80].split(';')
-
-            if ccf_chrom == 'chrX' or ccf_chrom == 'chrY':
-                continue
 
             if 'TOO_MANY_ALLELES' in tags or 'TOO_MANY_CHAMBERS' in tags: #or 'ADJACENT_INDEL_OR_CLIP' in tags:
                 continue
@@ -1017,9 +1011,6 @@ def accuracy_count_strand_pairing_genomic(chamber_call_file, GFF_file, WGS_VCF_f
             ref_allele = ccf_line[2]
 
             tags = ccf_line[80].split(';')
-
-            if ccf_chrom == 'chrX' or ccf_chrom == 'chrY':
-                continue
 
             if 'TOO_MANY_ALLELES' in tags or 'TOO_MANY_CHAMBERS' in tags:# or 'ADJACENT_INDEL_OR_CLIP' in tags:
                 continue
