@@ -113,6 +113,37 @@ COV_INTERVAL = 10
 #for i in range(1,15):
 #    cov_frac_dist[i] = [1/i]*i
 
+def same_mixture_occurs_twice(base_data,nonzero_chambers):
+
+    mixtures_seen = set()
+
+    for cell in range(0,n_cells):  # for each cell
+        for chamber in nonzero_chambers[cell]:
+            
+            pileup = base_data[cell][chamber]
+            counter = defaultdict(int)
+            for base in pileup:
+                counter[base] += 1
+    
+            bases_seen = set()
+            for base, v in counter.items():
+                if v >= 3:
+                    bases_seen.add(base)
+    
+            if len(bases_seen) >= 3:
+                return True
+    
+            elif len(bases_seen) == 2:
+    
+                mixture_str = ''.join(sorted(list(bases_seen)))
+    
+                if mixture_str in mixtures_seen:
+                    return True
+    
+                mixtures_seen.add(mixture_str)
+
+    return False
+
 # INPUT
 # G: a tuple that specifies genotype e.g. ('A','T')
 # nonzero_chambers: a list containing the indices of chambers 0..23 (or 24, unsampled) where strands may be (have read coverage)
@@ -830,6 +861,9 @@ def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only
 
             if len(maj_alleles) >= 5:
                 tags.append('TOO_MANY_ALLELES')
+
+            if same_mixture_occurs_twice(base_data, nonzero_chambers):
+                tags.append('SAME_MIXTURE_OCCURS_TWICE')
 
             if nonzero_chamber_count > 0 and not too_many_chambers:
 

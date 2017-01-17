@@ -8,7 +8,6 @@ Created on Mon Oct  3 18:29:04 2016
 import pickle
 import re
 import pysam
-from collections import defaultdict
 
 GMS_LIMIT = 0.5
 chroms = ['chr{}'.format(i) for i in range(1,23)]
@@ -93,37 +92,6 @@ def split_gms(infiles, chunklist, outputlst):
 
     if not output.closed:
         output.close()
-
-
-def same_mixture_occurs_twice(pileups):
-
-    mixtures_seen = set()
-
-    for pileup in pileups:
-
-        counter = defaultdict(int)
-        for base in pileup:
-            counter[base] += 1
-
-        bases_seen = set()
-        for base, v in counter.items():
-            if v >= 3:
-                bases_seen.add(base)
-
-        if len(bases_seen) >= 3:
-            return True
-
-        elif len(bases_seen) == 2:
-
-            mixture_str = ''.join(sorted(list(bases_seen)))
-
-            if mixture_str in mixtures_seen:
-                return True
-
-            mixtures_seen.add(mixture_str)
-
-    return False
-
 
 def parse_bedfile(input_file):
 
@@ -374,7 +342,7 @@ def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_
 
             tags = ccf_line[80].split(';')
 
-            if 'TOO_MANY_CHAMBERS' in tags: #or 'ADJACENT_INDEL_OR_CLIP' in tags: # 'TOO_MANY_ALLELES' in tags or
+            if 'TOO_MANY_ALLELES' in tags or 'TOO_MANY_CHAMBERS' in tags or 'SAME_MIXTURE_OCCURS_TWICE' in tags: #or 'ADJACENT_INDEL_OR_CLIP' in tags: # 'TOO_MANY_ALLELES' in tags or
                 continue
 
             call = ccf_line[3]
@@ -399,18 +367,13 @@ def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_
 
             base_call_list = [x for x in ccf_line[5:80] if 'CELL' not in x]
 
-            pileups = []
             for call in base_call_list:
                 if call == '*':
                     continue
 
                 xchamber_calls, basic_calls, pileup = call.split('|')
 
-                pileups.append(pileup)
 
-
-            if same_mixture_occurs_twice(pileups): # likely mapping issue
-                continue
 
             '''
             ccf_alleles       = []
@@ -681,7 +644,7 @@ def accuracy_count_strand_pairing(chamber_call_file, GFF_file, WGS_VCF_file, CGI
 
             tags = ccf_line[80].split(';')
 
-            if 'TOO_MANY_ALLELES' in tags or 'TOO_MANY_CHAMBERS' in tags: #or 'ADJACENT_INDEL_OR_CLIP' in tags:
+            if 'TOO_MANY_ALLELES' in tags or 'SAME_MIXTURE_OCCURS_TWICE' in tags or 'TOO_MANY_CHAMBERS' in tags: #or 'ADJACENT_INDEL_OR_CLIP' in tags:
                 continue
 
             call = ccf_line[3]
@@ -703,18 +666,11 @@ def accuracy_count_strand_pairing(chamber_call_file, GFF_file, WGS_VCF_file, CGI
 
             base_call_list = [x for x in ccf_line[5:80] if 'CELL' not in x]
 
-            pileups = []
             for call in base_call_list:
                 if call == '*':
                     continue
 
                 xchamber_calls, basic_calls, pileup = call.split('|')
-
-                pileups.append(pileup)
-
-
-            if same_mixture_occurs_twice(pileups): # likely mapping issue
-                continue
 
             call_dict = dict()
 
@@ -1012,7 +968,7 @@ def accuracy_count_strand_pairing_genomic(chamber_call_file, GFF_file, WGS_VCF_f
 
             tags = ccf_line[80].split(';')
 
-            if 'TOO_MANY_ALLELES' in tags or 'TOO_MANY_CHAMBERS' in tags:# or 'ADJACENT_INDEL_OR_CLIP' in tags:
+            if 'TOO_MANY_ALLELES' in tags or 'SAME_MIXTURE_OCCURS_TWICE' in tags or 'TOO_MANY_CHAMBERS' in tags:# or 'ADJACENT_INDEL_OR_CLIP' in tags:
                 continue
 
             call = ccf_line[3]
@@ -1034,18 +990,12 @@ def accuracy_count_strand_pairing_genomic(chamber_call_file, GFF_file, WGS_VCF_f
 
             base_call_list = [x for x in ccf_line[5:80] if 'CELL' not in x]
 
-            pileups = []
             for call in base_call_list:
                 if call == '*':
                     continue
 
                 xchamber_calls, basic_calls, pileup = call.split('|')
 
-                pileups.append(pileup)
-
-
-            if same_mixture_occurs_twice(pileups): # likely mapping issue
-                continue
 
             call_dict = dict()
 

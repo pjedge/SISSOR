@@ -223,8 +223,8 @@ rule call_alleles:
             ch_priors = 'parameters/ch_priors.p',
             hom_config_probs = 'parameters/hom_config_probs.p',
             het_config_probs = 'parameters/het_config_probs.p',
-            genotype_priors = 'parameters/genotype_priors.p',
-            #omega = 'parameters/omega.p'
+            haploid_genotype_priors = 'parameters/haploid_genotype_priors.p',
+            diploid_genotype_priors = 'parameters/diploid_genotype_priors.p'
     output: ccf = 'base_calls/unpaired/{r}.out'
     shell:  '{PYPY} sissorhands.py -i {input.pileup} -o {output.ccf}'
     #run:
@@ -247,7 +247,8 @@ rule estimate_parameters:
             'parameters/ch_priors.p',
             'parameters/hom_config_probs.p',
             'parameters/het_config_probs.p',
-            'parameters/genotype_priors.p',
+            'parameters/diploid_genotype_priors.p',
+            'parameters/haploid_genotype_priors.p',
             #'parameters/total_sampled_cell_positions.p',
             #'parameters/omega.p'
     run:
