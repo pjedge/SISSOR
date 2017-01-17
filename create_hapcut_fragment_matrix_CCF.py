@@ -4,17 +4,11 @@ import os
 
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
-in1 = 'base_calling/het_vcfs/cutoff3/whole_genome.out'
-in2 = []
-for cell in cells:
-    for chamber in chambers:
-        in2.append('base_calling/fragment_boundary_beds/{}/ch{}.bed'.format(cell,chamber))
-in3 = 'output_dir_CCF_frag'
 
 n_cells = 3
 n_chambers = 24
-XCHAMBER = False
-MIN_BASE_PROB = 0.75 #MIN_Q    = 30
+XCHAMBER = True
+MIN_BASE_PROB = 0.9 #MIN_Q    = 30
 MIN_COV  = 4
 
 chroms = ['chr{}'.format(x) for x in range(1,23)] + ['chrX','chrY']
