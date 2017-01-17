@@ -1,0 +1,78 @@
+__default__:
+    email:           pedge@eng.ucsd.edu
+    working_dir:     /home/pedge/git/SISSOR/base_calling
+    queue:           hotel
+    group:           bafna-group
+    qsub_stdout_dir: stdout
+    job_name:        snakemake_job
+    ppn:             1
+    walltime:        '20:00:00'
+
+het_vcf_file:
+  walltime: '150:00:00'
+
+prune_haplotype:
+    ppn: 1
+    walltime: '2:00:00'
+
+calculate_error_rates:
+    ppn: 1
+    walltime: '4:00:00'
+
+run_hapcut2:
+    ppn: 1
+    walltime: '5:00:00' #'20:00:00'
+
+merge_fragmat:
+    ppn: 1
+    walltime: '1:00:00'
+
+fix_fragmat:
+    ppn: 1
+    walltime: '4:00:00'
+
+make_fixed_beds:
+    ppn: 2
+    walltime: '3:00:00'
+
+create_augmented_fragmat:
+    ppn: 2
+    walltime: 30:00:00'
+
+sample_jobs:
+    ppn:      2
+    walltime: '10:00:00'
+
+combine_filtered:
+    walltime: '1:00:00'
+
+filter_CCF:
+    walltime: '1:00:00'
+
+accuracy_aggregate:
+    walltime: '5:00:00'
+
+accuracy_count:
+    walltime: '10:00:00'
+
+accuracy_count_strand_pairing:
+    walltime: '10:00:00'
+
+liftover_wgs_SNPs:
+    walltime: '40:00:00'
+
+liftover_wgs:
+    walltime: '10:00:00'
+
+sort_freebayes_wgs:
+    ppn: 4
+    walltime: '10:00:00'
+
+split_gms:
+    walltime: '70:00:00'
+
+call_alleles:
+    walltime: '40:00:00'
+
+pileup:
+    walltime: '10:00:00'
