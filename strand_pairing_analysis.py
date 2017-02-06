@@ -5,8 +5,7 @@ Created on Thu May 19 21:44:48 2016
 @author: peter
 """
 import sys
-sys.path.append('../../HapTools')
-sys.path.append('../haplotyping')
+sys.path.append('/home/pedge/git/HapTools')
 #import fileIO
 import fragment
 import sys
@@ -134,27 +133,27 @@ def overlap(f1, f2, haplotype_dict=None):
         el2 = f2.name.split(':')
         start2, end2 = [int(x) for x in el2[-1].split('-')]
 
-        if start2 >= end1:
+        if end1 - start2 < 3: #start2 >= end1:
             return None, None
 
         end = min([end1,end2])
         start = start2
 
-        s1 = [a for a in f1.seq if a[1] > start and a[1] < end]
-        s2 = [a for a in f2.seq if a[1] > start and a[1] < end]
+        #s1 = [a for a in f1.seq if a[1] > start and a[1] < end]
+        #s2 = [a for a in f2.seq if a[1] > start and a[1] < end]
 
         match1 = 0
         total1 = 0
         match2 = 0
         total2 = 0
-        for (snp_ix, gen_ix, a, q) in s1:
+        for (snp_ix, gen_ix, a, q) in f1.seq: #s1:
             if haplotype_dict[gen_ix] not in ['0','1'] or a not in ['0','1']:
                 continue
             if haplotype_dict[gen_ix] == a:
                 match1 += 1
             total1 += 1
 
-        for (snp_ix, gen_ix, a, q) in s2:
+        for (snp_ix, gen_ix, a, q) in f2.seq: #s2:
             if haplotype_dict[gen_ix] not in ['0','1'] or a not in ['0','1']:
                 continue
             if haplotype_dict[gen_ix] == a:

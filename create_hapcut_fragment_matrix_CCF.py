@@ -7,7 +7,7 @@ chambers = list(range(1,25))
 
 n_cells = 3
 n_chambers = 24
-XCHAMBER = True
+XCHAMBER = False
 MIN_BASE_PROB = 0.9 #MIN_Q    = 30
 MIN_COV  = 4
 

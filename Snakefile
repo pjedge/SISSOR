@@ -7,15 +7,23 @@ import chamber_allele_call_accuracy as caca
 import base_calls_to_vcf
 import strand_pairing_analysis
 from itertools import product
+sys.path.append('/home/pedge/git/HapTools')
+import fileIO
+from plot_sissor import plot_sissor
+from create_hapcut_fragment_matrix_CCF import create_hapcut_fragment_matrix_CCF
+from fix_chamber_contamination import fix_chamber_contamination
+import run_tools
+import error_rates
+import fileIO
 
 localrules: all, simlinks, pileup_test
 
-# cutoff values are coded as 1.0-10**(-1*x)
-# so 3 => 0.999
-# and 5 => 0.99999
-cutoffs = [1,3,5,7,9,11,13,15] #list(range(1,17))
+# cutoff values are phred scaled probability of error
+# so 30 => 0.999 accuracy
+# and 50 => 0.99999 accuracy
+cutoffs = [7,8,9,10,30,50,70,90,110,130,150]
 
-paired_cutoffs = [2,3]
+paired_cutoffs = [20,30]
 
 het_vcf_cutoffs = list(range(1,6))
 chroms = ['chr{}'.format(i) for i in range(1,23)]
@@ -88,11 +96,11 @@ BAC_vcf_dir               = 'haplotyping/data/PGP1_VCFs_BACindex'
 
 rule all:
     input:
-        "{}/sissor_haplotype_error_chromosome.png".format(HAPLOTYPE_PLOTS_DIR),
-        "{}/sissor_haplotype_error_genome.png".format(HAPLOTYPE_PLOTS_DIR),
-        #expand('accuracy_reports/unpaired/cutoff{cut}.results',cut=cutoffs),
-        #expand('accuracy_reports/paired_same_cell/cutoff{cut}.results',cut=paired_cutoffs),
-        #expand('accuracy_reports/paired_all_cells/cutoff{cut}.results',cut=paired_cutoffs),
+        #"{}/sissor_haplotype_error_genome.png".format(HAPLOTYPE_PLOTS_DIR),
+        #expand('accuracy_reports/paired_same_cell/cutoff{cut}.counts.p',cut=paired_cutoffs),
+        #expand('accuracy_reports/paired_all_cells/cutoff{cut}.counts.p',cut=paired_cutoffs),
+        expand('accuracy_reports/unpaired/cutoff{cut}.counts.p',cut=cutoffs),
+        expand('accuracy_reports/ROC/cutoff{cut}.counts.p',cut=cutoffs),
 
 
 rule het_vcf_file:
@@ -103,6 +111,45 @@ rule het_vcf_file:
     run:
         base_calls_to_vcf.base_calls_to_vcf(input.ccfs,(1.0-10**(-1*int(wildcards.cut))),output.vcf, output.ccf_het)
 
+rule accuracy_aggregate:
+    params: job_name = 'accuracy_aggregate.{cut}'
+    input: counts = expand('accuracy_reports/{{report_name}}/split/{r}/{{cut}}/counts.p',r=regions),
+            mof = expand('accuracy_reports/{{report_name}}/split/{r}/{{cut}}/mismatches',r=regions),
+    output: counts = 'accuracy_reports/{report_name}/cutoff{cut}.counts.p',
+            mof = 'accuracy_reports/{report_name}/cutoff{cut}.mismatches'
+    run:
+        caca.accuracy_aggregate(input.counts,output.counts)
+        shell('cat {input.mof} > {output.mof}')
+
+rule accuracy_count_ROC:
+    params: job_name = 'accuracy_count_ROC.{chrom}.{start}.{end}'
+    input:  ccf = 'base_calls/unpaired/{chrom}.{start}.{end}.out',
+            gff = CGI_SNPs1,
+            cgi_vcf  = CGI_SNPs2,
+            gms = 'gms/{chrom}.{start}.{end}.gms',
+            hg19 = HG19,
+            wgs_vcf = 'wgs/wgs_hg19.vcf',
+    output: counts_lst = expand('accuracy_reports/ROC/split/{{chrom}}.{{start}}.{{end}}/{cut}/counts.p',cut=cutoffs),
+            mof_lst = temp(expand('accuracy_reports/ROC/split/{{chrom}}.{{start}}.{{end}}/{cut}/mismatches',cut=cutoffs)),
+    run:
+        reg_chrom = str(wildcards.chrom)
+        reg_start = int(wildcards.start)
+        reg_end   = int(wildcards.end)
+        region = (reg_chrom, reg_start, reg_end)
+        for counts, mof, cut in zip(output.counts_lst, output.mof_lst, cutoffs):
+            caca.accuracy_count_single_strand_for_ROC(input.ccf, input.gff, input.wgs_vcf, input.cgi_vcf, input.gms, input.hg19, region, (1.0-10**(-0.1*float(cut))), counts, mof)
+
+'''
+rule accuracy_aggregate_strand_pairing:
+    params: job_name = 'accuracy_aggregate_strand_pairing.{cut}'
+    input: counts = expand('accuracy_reports/{{report_name}}/split/{r}/{{cut}}/counts.p',r=regions),
+            mof = expand('accuracy_reports/{{report_name}}/split/{r}/{{cut}}/mismatches',r=regions),
+    output: counts = 'accuracy_reports/{report_name}/cutoff{cut}.counts.p',
+            mof = 'accuracy_reports/{report_name}/cutoff{cut}.mismatches'
+    run:
+        caca.accuracy_aggregate_strand_pairing(input.counts,output.counts)
+        shell('cat {input.mof} > {output.mof}')
+'''
 rule accuracy_count_strand_pairing:
     params: job_name = 'accuracy_count_strand_pairing.{mode}.{chrom}.{start}.{end}'
     input:  ccf = 'base_calls/paired/{chrom}.{start}.{end}.out',
@@ -123,10 +170,9 @@ rule accuracy_count_strand_pairing:
             exit(1)
         same_cell_only = (wildcards.mode == 'same_cell')
 
-
         for counts, mof, cut in zip(output.counts_lst, output.mof_lst, paired_cutoffs):
-            CUT = (1.0-10**(-1*int(cut))) if cut != None else None
-            caca.accuracy_count_strand_pairing(input.ccf, input.gff, input.wgs_vcf, input.cgi_vcf, input.gms, input.hg19, region, CUT, counts, mof, same_cell_only=same_cell_only)
+            CUT = (1.0-10**(-0.1*float(cut))) if cut != None else None
+            caca.accuracy_count_strand_pairing_genomic(input.ccf, input.gff, input.wgs_vcf, input.cgi_vcf, input.gms, input.hg19, region, CUT, counts, mof, same_cell_only=same_cell_only)
 
 rule annotate_strand_pairs:
     params: job_name = 'annotate_strand_pairs.{r}'
@@ -144,9 +190,9 @@ rule combine_paired_strand_files:
 
 rule pair_strands:
     params: job_name = 'pair_strands'
-    input: frag = 'haplotyping/data/PGP1_ALL/fragmat/cov1_basic/{chrom}',
+    input: frag = 'haplotyping/data/PGP1_ALL/fragmat/cov1_strict/{chrom}',
            vcf  = 'haplotyping/data/PGP1_VCFs_BACindex/{chrom}.vcf',
-           hap  = 'haplotyping/experiments/hapcut2_PGP1_ALL/cov1_basic/{chrom}.output'
+           hap  = 'haplotyping/experiments/hapcut2_PGP1_ALL/cov1_strict/{chrom}.output'
     output: sep = 'strand_pairs/{chrom}',
     run:
         strand_pairing_analysis.pair_strands(input.frag,input.vcf,output.sep,input.hap)
@@ -160,25 +206,22 @@ rule plot_hapcut2_results:
         stats_file  = "{}/hapcut2.stats.p".format(HAPLOTYPE_ERROR_RATES_DIR),
         labels_file = "{}/hapcut2.labels.p".format(HAPLOTYPE_ERROR_RATES_DIR)
     output:
-        plot1 = "%s/sissor_haplotype_error_chromosome.png" % HAPLOTYPE_PLOTS_DIR,
         plot2 = "%s/sissor_haplotype_error_genome.png" % HAPLOTYPE_PLOTS_DIR
     run:
         data = pickle.load(open(input.stats_file,"rb"))
         labels = pickle.load(open(input.labels_file,"rb"))
-        plot_data.plot_experiment_sissor(data,labels,[],output.plot1)
         plot_sissor(data,labels,output.plot2)
 
-exp =['cov1_none','cov1_basic','cov1_strict','cov2_basic']
-exp_labels=['No processing','Basic Processing','Strict Processing','Basic Processing, coverage >= 2']
+exp =['cov1_none','cov1_basic','cov1_strict']#,'cov2_basic']
+exp_labels=['No processing','Basic Processing','Strict Processing']#'Basic Processing, coverage >= 2']
 rule calculate_error_rates:
     params:
         job_name = "hapcut2_error_rates"
     input:
-        hapblocks = expand("{E}/hapcut2_PGP1_ALL/{exp}/{c}.output",E=experiments_dir,exp=exp,c=chroms),
-        runtimes  = expand("{E}/hapcut2_PGP1_ALL/{exp}/{c}.runtime",E=experiments_dir,exp=exp,c=chroms),
-        fragmats  = expand("{d}/PGP1_ALL/fragmat/{exp}/{c}",d=data_dir,exp=exp,c=chroms),
+        hapblocks = expand("{E}/hapcut2_PGP1_ALL/{exp}/{c}.output",E=HAPLOTYPE_EXP_DIR,exp=exp,c=chroms),
+        fragmats  = expand("haplotyping/data/PGP1_ALL/fragmat/{exp}/{c}",exp=exp,c=chroms),
         var_vcfs  = expand("{v}/{c}.vcf",v=BAC_vcf_dir, c=chroms),
-        bac_haps  = expand("sissor_project/data/BAC/{c}.filtered",c=chroms)
+        bac_haps  = expand("haplotyping/data/BAC/{c}.filtered",c=chroms)
     output:
         stats_file  = "{}/hapcut2.stats.p".format(HAPLOTYPE_ERROR_RATES_DIR),
         labels_file = "{}/hapcut2.labels.p".format(HAPLOTYPE_ERROR_RATES_DIR)
@@ -191,8 +234,8 @@ rule calculate_error_rates:
             datalist = []
             for c in chroms: # chromosome
                 assembly_file = "{}/hapcut2_PGP1_ALL/{}/{}.output".format(HAPLOTYPE_EXP_DIR,x,c)
-                runtime_file  = "{}/hapcut2_PGP1_ALL/{}/{}.runtime".format(HAPLOTYPE_EXP_DIR,x,c)
-                frag_file     = "{}/PGP1_ALL/fragmat/{}/{}".format(data_dir,x,c)
+                runtime_file  = None
+                frag_file     = "haplotyping/data/PGP1_ALL/fragmat/{}/{}".format(x,c)
                 vcf_file      = "{}/{}.vcf".format(BAC_vcf_dir,c)
                 truth_file    = "haplotyping/data/BAC/{}.filtered".format(c)
                 err = error_rates.hapblock_hapblock_error_rate(truth_file, assembly_file, frag_file, vcf_file, runtime_file, use_SNP_index=True)
@@ -212,9 +255,9 @@ rule prune_haplotype:
     params:
         job_name = "{s}.{x}.prune_haplotype",
     input:
-        hapblocks = expand("{E}/hapcut2_{{s}}/{{x}}/{c}.output.uncorrected",E=experiments_dir,c=chroms)
+        hapblocks = expand("{E}/hapcut2_{{s}}/{{x}}/{c}.output.uncorrected",E=HAPLOTYPE_EXP_DIR,c=chroms)
     output:
-        hapblocks = expand("{E}/hapcut2_{{s}}/{{x}}/{c}.output",E=experiments_dir,c=chroms)
+        hapblocks = expand("{E}/hapcut2_{{s}}/{{x}}/{c}.output",E=HAPLOTYPE_EXP_DIR,c=chroms)
     run:
         for i, o in zip(input.hapblocks,output.hapblocks):
             fileIO.prune_hapblock_file(i, o, snp_conf_cutoff=0.95, split_conf_cutoff=-1, use_refhap_heuristic=True) #split_conf_cutoff=0.9999
@@ -224,16 +267,14 @@ rule run_hapcut2:
     params:
         job_name = "{s}.{c}.{x}.hapcut",
     input:
-        frag_file = "%s/{s}/fragmat/{x}/{c}" % data_dir,
+        frag_file = "haplotyping/data/{s}/fragmat/{x}/{c}",
         vcf_file  = lambda wildcards: expand("{v}/{c}.vcf", v=BAC_vcf_dir,c=wildcards.c)
     output:
         hapblocks = "{E}/hapcut2_{s}/{x}/{c}.output.uncorrected",
-        runtime = "{E}/hapcut2_{s}/{x}/{c}.runtime"
-    run:
-        # run hapcut
-        runtime = run_tools.run_hapcut2(HAPCUT2, input.frag_file, input.vcf_file, output.hapblocks, 5, 0.8, '--ea 1')
-        with open(output.runtime,'w') as rf:
-            print(runtime, file=rf)
+    shell:
+        '''
+        {HAPCUT2} --fragments {input.frag_file} --vcf {input.vcf_file} --output {output.hapblocks} --ea 1
+        '''
 
 # COMBINE FRAGMENT MATRICES
 rule fix_fragmat:
@@ -241,9 +282,9 @@ rule fix_fragmat:
         job_name  = "fix_fragmat.{x}",
     input:
         var_vcfs = expand("{v}/{CHR}.vcf",v=BAC_vcf_dir,CHR=chroms),
-        P_ALL = expand("{dat}/PGP1_ALL/augmented_fragmat/{c}",dat=data_dir,c=chroms)
+        P_ALL = expand("haplotyping/data/PGP1_ALL/augmented_fragmat/{c}",c=chroms)
     output:
-        fixed = expand("{{data_dir}}/PGP1_ALL/fragmat/{{x}}/{c}",c=chroms)
+        fixed = expand("haplotyping/data/PGP1_ALL/fragmat/{{x}}/{c}",c=chroms)
     run:
         mincov = 0
         if 'cov2' in wildcards.x:
@@ -285,7 +326,7 @@ rule combine_filtered:
 
 rule filter_CCF:
     params: job_name = 'filter_CCF_{chrom}.{start}.{end}'
-    input:  ccf      = 'base_calls/split/{chrom}.{start}.{end}.out',
+    input:  ccf      = 'base_calls/unpaired/{chrom}.{start}.{end}.out',
             vcf      = 'haplotyping/data/PGP1_VCFs_BACindex/all.vcf'
     output: ccf      = temp('haplotyping/data/ccf_split/{chrom}.{start}.{end}.ccf'),
             vcf      = temp('haplotyping/data/vcf_split/{chrom}.{start}.{end}.vcf'),
@@ -334,7 +375,7 @@ rule run_hapcut2_BAC:
     params:
         job_name = "{c}.BAC.hapcut2",
     input:
-        frag_file = "%s/BAC_frags_fixed/{c}" % data_dir,
+        frag_file = "haplotyping/data/BAC_frags_fixed/{c}",
         vcf_file  = "%s/{c}.vcf" % BAC_vcf_dir
     output:
         hapblocks = "haplotyping/data/BAC/{c}"
@@ -355,18 +396,6 @@ rule fix_fragmat_BAC:
     run:
         fix_chamber_contamination(input.frags,input.var_vcfs,output.fixed,threshold=2, min_coverage=0,mode='basic')
 
-
-
-rule accuracy_aggregate:
-    params: job_name = 'accuracy_aggregate.{cut}'
-    input: counts = expand('accuracy_reports/{{report_name}}/split/{r}/{{cut}}/counts.p',r=regions),
-            mof = expand('accuracy_reports/{{report_name}}/split/{r}/{{cut}}/mismatches',r=regions),
-    output: report = 'accuracy_reports/{report_name}/cutoff{cut}.results',
-            mof = 'accuracy_reports/{report_name}/cutoff{cut}.mismatches'
-    run:
-        caca.accuracy_aggregate(input.counts,output.report)
-        shell('cat {input.mof} > {output.mof}')
-
 rule accuracy_count_unpaired:
     params: job_name = 'accuracy_count_unpaired.{chrom}.{start}.{end}'
     input:  ccf = 'base_calls/unpaired/{chrom}.{start}.{end}.out',
@@ -376,15 +405,15 @@ rule accuracy_count_unpaired:
             hg19 = HG19,
             wgs_vcf = 'wgs/wgs_hg19.vcf',
             #bed_filter = 'eric_fragment_boundary_beds/sorted_merged.bed'
-    output: counts_lst = temp(expand('accuracy_reports/unpaired/split/{{chrom}}.{{start}}.{{end}}/{cut}/counts.p',cut=cutoffs)),
-            mof_lst = temp(expand('accuracy_reports/unpaired/split/{{chrom}}.{{start}}.{{end}}/{cut}/mismatches',cut=cutoffs)),
+    output: counts_lst = expand('accuracy_reports/unpaired/split/{{chrom}}.{{start}}.{{end}}/{cut}/counts.p',cut=cutoffs),
+            mof_lst = expand('accuracy_reports/unpaired/split/{{chrom}}.{{start}}.{{end}}/{cut}/mismatches',cut=cutoffs),
     run:
         reg_chrom = str(wildcards.chrom)
         reg_start = int(wildcards.start)
         reg_end   = int(wildcards.end)
         region = (reg_chrom, reg_start, reg_end)
         for counts, mof, cut in zip(output.counts_lst, output.mof_lst, cutoffs):
-            caca.accuracy_count(input.ccf, input.gff, input.wgs_vcf, input.cgi_vcf, input.gms, input.hg19, region, (1.0-10**(-1*int(cut))), counts, mof)
+            caca.accuracy_count(input.ccf, input.gff, input.wgs_vcf, input.cgi_vcf, input.gms, input.hg19, region, (1.0-10**(-0.1*float(cut))), counts, mof)
 
 rule liftover_wgs_SNPs:
     params: job_name  = 'liftover_SNPs',

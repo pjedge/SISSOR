@@ -15,14 +15,12 @@ mpl.rcParams.update({'font.size': 13})
 mpl.rc('lines', linewidth=3)
 
 def plot_sissor(data,labels, outname):
-    labels[3] = 'Basic Processing,\ncoverage >= 2'
     plt.figure(figsize=(10,5))
     ax = plt.subplot(121)
     N = 2
     errs0 = sum(data[0],error_rates.error_result())
     errs1 = sum(data[1],error_rates.error_result())
     errs2 = sum(data[2],error_rates.error_result())
-    errs3 = sum(data[3],error_rates.error_result())
 
     ind = np.arange(N)  # the x locations for the groups
     width = 0.15       # the width of the bars
@@ -47,13 +45,6 @@ def plot_sissor(data,labels, outname):
             width=0.15,      # smaller bar width
             align='center',
             label=labels[2])
-
-    plt.bar(ind+3*width, (errs3.get_switch_rate(),errs3.get_mismatch_rate()), color='y',
-            ecolor='black', # black error bar color
-            alpha=0.5,      # transparency
-            width=0.15,      # smaller bar width
-            align='center',
-            label=labels[3])
 
 
     # add some text for labels, title and axes ticks
@@ -95,13 +86,6 @@ def plot_sissor(data,labels, outname):
             width=0.15,      # smaller bar width
             align='center',
             label=labels[2])
-
-    plt.bar(ind+3*width, (errs3.get_N50()/1000000,errs3.get_AN50()/1000000), color='y',
-            ecolor='black', # black error bar color
-            alpha=0.5,      # transparency
-            width=0.15,      # smaller bar width
-            align='center',
-            label=labels[3])
 
     # add some text for labels, title and axes ticks
     ax.set_ylabel('Megabases')
