@@ -245,7 +245,6 @@ def accuracy_count(chamber_call_file, GFF_file, WGS_VCF_file, CGI_VCF_file, GMS_
                 continue
             genotype = vcf_line[9][0:3]
             qual = int(float(re.findall(qr_pat,fields)[0])) if genotype == '0/0' else float(vcf_line[5])
-
             if qual < 100:
                 continue
 
