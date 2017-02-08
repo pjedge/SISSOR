@@ -1391,7 +1391,7 @@ def accuracy_count_single_strand_for_ROC(chamber_call_file, GFF_file, WGS_VCF_fi
                         max_prob = prob
                         max_allele = allele
 
-                if len(max_allele) == 1:
+                if len(max_allele) == 1 and max_prob > cutoff:
                     ccf_alleles.append(max_allele)
 
             # alleles should be a subset of observed alleles

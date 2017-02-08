@@ -1,0 +1,31 @@
+haptools_dir:    /home/pedge/git/HapTools
+hapcut2:         /home/pedge/git/hapcut2/build/HAPCUT2
+data_dir:        sissor_project/data
+experiments_dir: sissor_project/experiments
+error_rates_dir: sissor_project/error_rates
+plots_dir:       sissor_project/plots
+qsub_stdout_dir: sissor_project/stdout
+
+BAC_hapblocks:   /oasis/tscc/scratch/pedge/data/BAC
+
+PGP1_21_ploidy1: /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/nosegfreebayes #/oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/freebayes/ploidy1
+PGP1_22_ploidy1: /oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/previous/2016OctMergedBAM #/oasis/tscc/scratch/wkchu/SISSOR/PGP1_222/previous/freebayesploidy1
+PGP1_A1_ploidy1: /oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/2016OctMergedBAM #/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/freebayes/ploidy1
+
+PGP1_21_ploidy2: /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/freebayes/ploidy2
+PGP1_22_ploidy2: /oasis/tscc/scratch/wkchu/SISSOR/PGP1_222/previous/freebayesploidy2
+PGP1_A1_ploidy2: /oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/freebayes/ploidy2
+
+PGP1_21_beds:    eric_fragment_boundary_beds/PGP1_21
+PGP1_22_beds:    eric_fragment_boundary_beds/PGP1_22
+PGP1_A1_beds:    eric_fragment_boundary_beds/PGP1_A1
+
+cell_ids:
+    - PGP1_21
+    - PGP1_22
+    - PGP1_A1
+
+input_filetypes:
+    - vcf
+    - pileup
+    - bed
