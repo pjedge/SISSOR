@@ -23,6 +23,7 @@ from fix_chamber_contamination import fix_chamber_contamination
 import pickle
 from collections import defaultdict
 from plot_sissor import plot_sissor
+from copy import copy
 
 # qsub stderr and stdout directories are not automatically created by snakemake!
 if not os.path.exists(config['qsub_stdout_dir']):
@@ -46,7 +47,7 @@ rule all:
     input:
         expand("{P}/sissor_haplotype_error_chromosome.png",P=config['plots_dir']),
         expand("{P}/sissor_haplotype_error_genome.png",P=config['plots_dir']),
-        expand("{d}/{s}/fixed_beds/ch{ch}.bed",d=data_dir,s=cells,ch=chambers)
+        expand('{d}/{cell}/ploidy1_split/ch{ch}.{chrom}.vcf',d=data_dir,cell=cells,ch=chambers,chrom=chroms)
 
 # PLOT RESULTS
 rule plot_hapcut2_results:
@@ -102,6 +103,69 @@ rule calculate_error_rates:
         pickle.dump(data,open(output.stats_file,"wb"))
         pickle.dump(labels,open(output.labels_file,"wb"))
 
+short_chrom_names = set([str(x) for x in range(1,23)]+['X','Y'])
+chrom_names = set(['chr'+str(x) for x in range(1,23)]+['chrX','chrY'])
+
+def format_chrom(chrom_str):
+    if chrom_str in short_chrom_names:
+        chrom_str = 'chr' + chrom_str
+    if chrom_str not in chrom_names:
+        return False
+    return chrom_str
+
+rule split_vcfs:
+    params: job_name = 'split_vcf.{cell}.{ch}'
+    input:  vcf = '{data_dir}/{cell}/ploidy1/ch{ch}.vcf'
+    output: split = expand('{{data_dir}}/{{cell}}/ploidy1_split/ch{{ch}}.{chrom}.vcf',chrom=chroms)
+    run:
+        chroms_output = list(zip(chroms,output.split))
+        chrom,outputfile = chroms_output.pop(0)
+        output = open(outputfile, 'w+')
+        with open(input.vcf,'r') as vcf:
+            for line in vcf:
+                if line[0] == '#' or len(line) < 3:
+                    continue
+
+                vcf_line = line.strip().split('\t')
+                vcf_chrom = format_chrom(vcf_line[0])
+
+                if vcf_chrom != chrom:
+                    done = False
+                    while not (vcf_chrom == chrom):
+                        output.close()
+                        if len(chroms_output) == 0:
+                            done = True
+                            break
+                        chrom, outputfile = chroms_output.pop(0)
+                        output = open(outputfile, 'w+')
+                    if done:
+                        break
+
+                # write to lifted over vcf
+                print(line,end='',file=output)
+
+        while len(chroms_output) > 0:
+            output.close()
+            chrom, outputfile = chroms_output.pop(0)
+            output = open(outputfile, 'w+')
+
+        if not output.closed:
+            output.close()
+
+rule combine_paired_strand_files:
+    params: job_name = 'combine_paired_strand_files'
+    input:  sep = expand('strand_pairs/{chrom}',chrom=chroms),
+    output: combined = 'strand_pairs/all',
+    shell:  'cat {input.sep} > {output.combined}'
+
+rule pair_strands:
+    params: job_name = 'pair_strands'
+    input: frag = 'sissor_project/data/PGP1_ALL/fragmat/cov1_strict/{chrom}',
+           vcf  = 'PGP1_VCFs/{chrom}.vcf',
+           hap  = 'sissor_project/experiments/hapcut2_PGP1_ALL/cov1_strict/{chrom}.output'
+    output: sep = 'strand_pairs/{chrom}',
+    run:
+        strand_pairing_analysis.pair_strands(input.frag,input.vcf,output.sep,input.hap)
 
 # RUN HAPCUT2
 rule prune_haplotype:
@@ -228,7 +292,7 @@ rule create_augmented_fragmat:
 # simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
 rule simlinks:
     input:
-        expand("{DIR}/PGP1_21_ch{chpad}.freebayes.remap.vcf",DIR=config['PGP1_21_ploidy1'],chpad=chambers_pad),
+        expand("{DIR}/PGP1_21_ch{chpad}.noseg.freebayes.vcf",DIR=config['PGP1_21_ploidy1'],chpad=chambers_pad),
         expand("{DIR}/PGP1_21_ch{chpad}.ploidy2.freebayes.depth.vcf",DIR=config['PGP1_21_ploidy2'],chpad=chambers_pad),
         expand("{DIR}/ch{ch}.bed",DIR=config['PGP1_21_beds'],ch=chambers),
         expand("{DIR}/PGP1_22_ch{chpad}.noseg.sorted.freebayes.vcf",DIR=config['PGP1_22_ploidy1'],chpad=chambers_pad),
@@ -243,7 +307,7 @@ rule simlinks:
             mkdir -p {data_dir}/PGP1_21/ploidy1
             mkdir -p {data_dir}/PGP1_21/ploidy2
             mkdir -p {data_dir}/PGP1_21/beds
-            ln -s {config[PGP1_21_ploidy1]}/PGP1_21_ch{chpad}.freebayes.remap.vcf {data_dir}/PGP1_21/ploidy1/ch{ch}.vcf
+            ln -s {config[PGP1_21_ploidy1]}/PGP1_21_ch{chpad}.noseg.freebayes.vcf {data_dir}/PGP1_21/ploidy1/ch{ch}.vcf
             ln -s {config[PGP1_21_ploidy2]}/PGP1_21_ch{chpad}.ploidy2.freebayes.depth.vcf {data_dir}/PGP1_21/ploidy2/ch{ch}.vcf
             cp {config[PGP1_21_beds]}/ch{ch}.bed {data_dir}/PGP1_21/beds/ch{ch}.bed
 
@@ -261,60 +325,6 @@ rule simlinks:
             ln -s {config[PGP1_A1_ploidy2]}/PGP1_A1_ch{chpad}.freebayes.ploidy2.allpos.vcf {data_dir}/PGP1_A1/ploidy2/ch{ch}.vcf
             cp {config[PGP1_A1_beds]}/ch{ch}.bed {data_dir}/PGP1_A1/beds/ch{ch}.bed
             ''')
-
-
-
-# prepare a small 1 Mb region of chr4 from each chamber
-# will serve as a testing ground for base call correction code
-SAMPLE_CHROM = 'chr4'
-SAMPLE_START = int(4e7)
-SAMPLE_END   = int(5e7)
-
-short_chrom_names = set([str(x) for x in range(1,23)]+['X','Y'])
-chrom_names = set(['chr'+str(x) for x in range(1,23)]+['chrX','chrY'])
-
-def format_chrom(chrom_str):
-    if chrom_str in short_chrom_names:
-        chrom_str = 'chr' + chrom_str
-    assert(chrom_str in chrom_names)
-    return chrom_str
-
-rule make_subsample_chamber:
-    params:
-        job_name = 'subsample_{x}_{ch}'
-    input:
-        ploidy1 = 'sissor_project/data/{x}/ploidy1/ch{ch}.vcf'
-    output:
-        ploidy1 = 'sissor_project/test_data/{x}/ploidy1/ch{ch}.vcf'
-    run:
-        with open(input.ploidy1, 'r') as infile, open(output.ploidy1, 'w') as outfile:
-
-            for line in infile:
-                if len(line) < 3 or line[0] == '#':
-                    print(line,file=outfile,end='')
-                    continue
-
-                # read line elements
-                el    = line.strip().split()
-                if len(el) < 3:
-                    print(line,file=outfile,end='')
-                    continue
-
-                chrom = format_chrom(el[0])
-                pos   = int(el[1])-1
-
-                if chrom != SAMPLE_CHROM or pos < SAMPLE_START:
-                    continue
-                if chrom == SAMPLE_CHROM and pos > SAMPLE_END:
-                    break
-
-                print(line,file=outfile,end='')
-
-rule make_subsample:
-    params:
-        job_name = 'make_subsamples'
-    input:
-        expand('sissor_project/test_data/{x}/ploidy1/ch{ch}.vcf',x=cells,ch=chambers)
 
 rule clean:
     shell:

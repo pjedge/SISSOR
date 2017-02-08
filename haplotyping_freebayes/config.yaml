@@ -8,7 +8,7 @@ qsub_stdout_dir: sissor_project/stdout
 
 BAC_hapblocks:   /oasis/tscc/scratch/pedge/data/BAC
 
-PGP1_21_ploidy1: /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/freebayes/freebayesrawcalls #/oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/freebayes/ploidy1
+PGP1_21_ploidy1: /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/nosegfreebayes #/oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/freebayes/ploidy1
 PGP1_22_ploidy1: /oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/previous/2016OctMergedBAM #/oasis/tscc/scratch/wkchu/SISSOR/PGP1_222/previous/freebayesploidy1
 PGP1_A1_ploidy1: /oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/2016OctMergedBAM #/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/freebayes/ploidy1
 

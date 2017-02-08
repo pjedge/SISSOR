@@ -5,8 +5,12 @@ __default__:
     group:           bafna-group
     qsub_stdout_dir: sissor_project/stdout
     job_name:        snakemake_job
-    ppn:             2
-    walltime:        '30:00:00'
+    ppn:             1
+    walltime:        '20:00:00'
+
+split_vcfs:
+    ppn: 1
+    walltime: '40:00:00'
 
 prune_haplotype:
     ppn: 1
