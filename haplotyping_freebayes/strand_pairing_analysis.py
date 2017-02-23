@@ -6,6 +6,8 @@ Created on Thu May 19 21:44:48 2016
 """
 import sys
 sys.path.append('/home/pedge/git/HapTools')
+sys.path.append('/home/peter/git/HapTools')
+
 #import fileIO
 import fragment
 import sys
@@ -405,6 +407,69 @@ def pair_strands(fragmentfile, vcf_file, outputfile, haplotype_file):
 
     return total
 
+def parse_bedfile(input_file):
+
+    boundaries = []
+    with open(input_file,'r') as inf:
+        for line in inf:
+
+            if len(line) < 3:
+                continue
+
+            el = line.strip().split('\t')
+
+            chrom = el[0]
+            start = int(el[1])
+            stop  = int(el[2])
+
+            boundaries.append((chrom, start, stop))
+
+    return boundaries
+
+test1 = []
+for cell in ['PGP1_21','PGP1_22','PGP1_A1']:
+    for chamber in range(1,25):
+        test1.append('eric_fragment_boundary_beds/{}/ch{}.bed'.format(cell,chamber))
+def pair_strands_XY(bedfile_lst=test1,outfile='foobar.txt'):
+
+    def filter_XY(bedlst):
+        return [(chrom, start, stop) for (chrom, start, stop) in bedlst if chrom in ['chrX','chrY','X','Y']]
+
+    bed_data = [filter_XY(parse_bedfile(bf)) for bf in bedfile_lst]
+    with open(outfile,'w') as of:
+        for i in range(len(bed_data)):
+            for j in range(i+1, len(bed_data)):
+
+                bd1 = bed_data[i]
+                bd2 = bed_data[j]
+
+                for (chrom1,start1,end1) in bd1:
+                    for (chrom2, start2, end2) in bd2:
+
+                        if chrom1 != chrom2:
+                            continue
+
+                        if start1 > start2:
+                            temp1 = start1
+                            temp2 = end1
+                            start1 = start2
+                            end1   = end2
+                            start2 = temp1
+                            end2   = temp2
+
+                        cell1 = int(i / n_chambers)
+                        chamber1 = int(i % n_chambers)
+                        cell2 = int(j / n_chambers)
+                        chamber2 = int(j % n_chambers)
+
+                        if start2 < end1:
+                            #overlap
+                            end_overlap = min([end1, end2])
+                            start_overlap = start2
+                            el = [chrom1,start_overlap,end_overlap,cell1,chamber1,cell2,chamber2]
+                            line = '\t'.join([str(x) for x in el])
+                            print(line,file=of)
+
 def test_pair_strands():
     #chroms = ['chr{}'.format(x) for x in range(1,23)]
     chroms = ['chr20']
@@ -422,5 +487,6 @@ def test_pair_strands():
     print(TOTAL)
 
 if __name__ == '__main__':
-    test_pair_strands()
+    pass
+    #test_pair_strands()
     #pair_strands()

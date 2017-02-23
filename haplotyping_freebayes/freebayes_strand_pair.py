@@ -385,6 +385,3 @@ def sissor_freebayes_strand_pair(input_files, fragment_assignment_file, gff_file
     for handle in input_files:
         handle.close()
 
-
-
-sissor_freebayes_strand_pair()
