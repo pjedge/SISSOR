@@ -17,9 +17,60 @@ dp_pat = re.compile("DP=(\d+)")
 qr_pat = re.compile(";QR=(\d+)")
 type_pat = re.compile("TYPE=([^;]+);")
 
+short_chrom_names = set([str(x) for x in range(1,23)]+['X','Y'])
+chrom_names = set(['chr'+str(x) for x in range(1,23)]+['chrX','chrY'])
+
+def format_chrom(chrom_str):
+    if chrom_str in short_chrom_names:
+        chrom_str = 'chr' + chrom_str
+    if chrom_str not in chrom_names:
+        return False
+    return chrom_str
+
 chr_num = dict()
 for i,chrom in enumerate(chroms):
     chr_num[chrom] = i
+
+def split_vcf(input_vcf, chunklist, output_vcfs):
+
+    regions_output = list(zip(chunklist, output_vcfs))
+    (chrom, start, stop), outputfile = regions_output.pop(0)
+    output = open(outputfile, 'w')
+    with open(input_vcf,'r') as vcf:
+        for line in vcf:
+            if line[0] == '#' or len(line) < 3:
+                continue
+
+            vcf_line = line.strip().split('\t')
+
+            vcf_chrom = format_chrom(vcf_line[0])
+            if not vcf_chrom:
+                continue
+            vcf_pos = int(vcf_line[1])
+
+            if vcf_chrom != chrom or vcf_pos > stop:
+
+                done = False
+                while not (vcf_chrom == chrom and vcf_pos >= start and vcf_pos <= stop):
+                    output.close()
+                    if len(regions_output) == 0:
+                        done = True
+                        break
+                    (chrom, start, stop), outputfile = regions_output.pop(0)
+                    output = open(outputfile, 'w')
+                if done:
+                    break
+
+            # write to lifted over vcf
+            print(line,end='',file=output)
+
+    while len(regions_output) > 0:
+        output.close()
+        (chrom, start, stop), outputfile = regions_output.pop(0)
+        output = open(outputfile, 'w')
+
+    if not output.closed:
+        output.close()
 
 # next function that returns 0 instead of raising StopIteration
 # this is convenient for iterating over file 2 at a time
@@ -160,11 +211,11 @@ def format_chrom(chrom_str):
 def where(lst):
     return [i for i in range(len(lst)) if lst[i]]
 
-def sissor_freebayes_strand_pair(input_files, fragment_assignment_file, gff_file, fasta_file, output):
+def freebayes_strand_pair(input_files, fragment_assignment_file, gff_file, fasta_file, count_file, mismatch_file, same_cell_only):
 
     input_files = [open(inf,'r') for inf in input_files]
     gffr = gff_reader(gff_file,fasta_file)
-
+    print('Reading fragment pair file...')
     counts = defaultdict(int)
     paired_fragments = [] # list of (start, end, ix1, ix2) tuples
     with open(fragment_assignment_file,'r') as infile:
@@ -210,8 +261,10 @@ def sissor_freebayes_strand_pair(input_files, fragment_assignment_file, gff_file
                 break
 
     processed = 0
+    print('Iterating through VCF file...')
+
     # until all files have reached stopiteration
-    with open(output,'w') as opf:
+    with open(mismatch_file,'w') as mof:
         while sum([not l for l in lines]) < N:
 
             # "element list"
@@ -348,6 +401,9 @@ def sissor_freebayes_strand_pair(input_files, fragment_assignment_file, gff_file
             num_pairs = 0
             for (chrom, start, end, cell1, chamber1, cell2, chamber2) in current_paired_fragments:
 
+                if cell1 != cell2 and same_cell_only:
+                    continue
+
                 if (cell1,chamber1) in allele_dict and (cell2,chamber2) in allele_dict:
 
                     num_pairs += 1
@@ -368,7 +424,31 @@ def sissor_freebayes_strand_pair(input_files, fragment_assignment_file, gff_file
             if num_pairs > 0:
 
                 counts[count_key(is_SNP,matches_CGI,half_match,mismatch)] += 1
-                print("{} {} {} {}".format(chrom, pos, allele_dict, count_key(is_SNP, matches_CGI, half_match, mismatch)))
+
+                if (half_match or mismatch) and matches_CGI == False:
+
+                    print('Found a mismatch at {} {}...'.format(chrom, pos))
+
+                    if half_match and mismatch:
+                        print('HALF_MATCH and MISMATCH!',file=mof)
+                    elif half_match:
+                        print('HALF_MATCH!',file=mof)
+                    elif mismatch:
+                        print('MISMATCH!',file=mof)
+                    print('CGI ALLELE: {}'.format(''.join(list(cgi_allele))),file=mof)
+                    print('STRAND_PAIRS:',file=mof)
+                    for (chrom, start, end, cell1, chamber1, cell2, chamber2) in current_paired_fragments:
+                        print("{}:{} paired to {}:{}".format(cell1, chamber1, cell2, chamber2),file=mof)
+                    print('VCF INFO:',file=mof)
+
+                    for i in where(on_chrom_pos):
+
+                        cell_num = int(i / n_chambers)
+                        ch_num   = i % n_chambers
+                        vcf_info = ['{}:{}'.format(cell_num,ch_num)] + el_lst[i]
+                        print('\t'.join(vcf_info),file=mof)
+
+                    print('**************************************************',file=mof)
 
                 processed += 1
 #            if processed > 500:
@@ -378,13 +458,25 @@ def sissor_freebayes_strand_pair(input_files, fragment_assignment_file, gff_file
 
                 lines[i] = safenext(input_files[i])
 
-    print(counts)
-    pickle.dump(counts, open(output,'wb'))
+    print('Dumping counts to pickle file {}...'.format(count_file))
+    pickle.dump(counts, open(count_file,'wb'))
     # close all chambers
 
     for handle in input_files:
         handle.close()
 
+    print('Program complete.')
 
 
-sissor_freebayes_strand_pair()
+def accuracy_aggregate(counts_pickle_files, pickle_outfile):
+
+    counts = defaultdict(int)
+
+    for pfile in counts_pickle_files:
+        temp_dict = pickle.load(open(pfile,'rb'))
+        for k,v in temp_dict.items():
+            counts[k] += v
+
+    pickle.dump(counts,open(pickle_outfile,'wb'))
+    #print("Strand Mismatch, not in CGI, divided by total:")
+    #print(sum([x[1] for x in counts.items() if x[0][1] != None and x[0][2] == True]) / sum([x[1] for x in counts.items() if x[0][1] != None]))
