@@ -7,13 +7,14 @@
 # example execution for a TORQUE cluster:
 # snakemake -j 200 --cluster-config cluster.yaml --cluster "qsub -A {cluster.group} -V -q {cluster.queue} -o {cluster.qsub_stdout_dir}/{params.job_name}.o -e {cluster.qsub_stdout_dir}/{params.job_name}.e -N {params.job_name} -l nodes=1:ppn={cluster.ppn} -l walltime={cluster.walltime} -M {cluster.email} -m e -d {cluster.working_dir}" --local-cores 1
 sys.path.append('/home/peter/git/HapTools')
+sys.path.append('/home/pedge/git/hapcut2/utilities')
 configfile: "config.yaml"
 localrules: all, plot_hapcut2_results, simlinks, clean
 
 import sys
 sys.path.append(config['haptools_dir'])
 import run_tools
-import error_rates
+import calculate_haplotype_statistics as chs
 import fileIO
 import plot_data
 import os
@@ -24,10 +25,52 @@ import pickle
 from collections import defaultdict
 from plot_sissor import plot_sissor
 from copy import copy
+from freebayes_strand_pair import freebayes_strand_pair, accuracy_aggregate, split_vcf
+from itertools import product
+import strand_pairing_analysis
 
 # qsub stderr and stdout directories are not automatically created by snakemake!
 if not os.path.exists(config['qsub_stdout_dir']):
     os.makedirs(config['qsub_stdout_dir'])
+
+chunksize = 25000000
+
+hg19_size_list = [('chr1', 249250621),
+ ('chr2', 243199373),
+ ('chr3', 198022430),
+ ('chr4', 191154276),
+ ('chr5', 180915260),
+ ('chr6', 171115067),
+ ('chr7', 159138663),
+ ('chr8', 146364022),
+ ('chr9', 141213431),
+ ('chr10', 135534747),
+ ('chr11', 135006516),
+ ('chr12', 133851895),
+ ('chr13', 115169878),
+ ('chr14', 107349540),
+ ('chr15', 102531392),
+ ('chr16', 90354753),
+ ('chr17', 81195210),
+ ('chr18', 78077248),
+ ('chr19', 59128983),
+ ('chr20', 63025520),
+ ('chr21', 48129895),
+ ('chr22', 51304566),
+ ('chrX', 155270560),
+ ('chrY', 59373566)]
+
+
+# create chunks of hg19
+# return list of (chrom,start,stop) tuples. stop is inclusive
+chunklist = []
+
+for chrom, chrlen in hg19_size_list:
+    for start in range(1,chrlen+1,chunksize):
+        end = start+chunksize-1 if start+chunksize-1 < chrlen else chrlen
+        chunklist.append((chrom,start,end))
+
+regions = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in chunklist]
 
 
 # specify chambers
@@ -37,6 +80,7 @@ plots_dir = config["plots_dir"]
 chambers = list(range(1,25))
 chambers_pad = ['{0:02d}'.format(c) for c in chambers]
 chroms  = ['chr{}'.format(i) for i in range(1,23)]
+chroms_XY  = ['chr{}'.format(i) for i in range(1,23)]
 samples = ['PGP1_ALL','PGP1_21','PGP1_22','PGP1_A1']
 cells=samples[1:]
 
@@ -45,24 +89,31 @@ variant_vcf_dir_fp = join(data_dir,'PGP1_VCFs_w_false_positives')
 
 rule all:
     input:
-        expand("{P}/sissor_haplotype_error_chromosome.png",P=config['plots_dir']),
+         #'sissor_project/experiments/strand_pair/within_cell.counts.p',
+         #'sissor_project/experiments/strand_pair/between_cell.counts.p'
+        #expand("{P}/sissor_haplotype_error_chromosome.png",P=config['plots_dir']),
         expand("{P}/sissor_haplotype_error_genome.png",P=config['plots_dir']),
-        expand('{d}/{cell}/ploidy1_split/ch{ch}.{chrom}.vcf',d=data_dir,cell=cells,ch=chambers,chrom=chroms)
+        #expand('{d}/{cell}/ploidy1_split/ch{ch}.{chrom}.vcf',d=data_dir,cell=cells,ch=chambers,chrom=chroms)
+        #'strand_pairs/all'
+
 
 # PLOT RESULTS
+
+# PLOT RESULTS
+HAPLOTYPE_ERROR_RATES_DIR = 'sissor_project/error_rates'
+HAPLOTYPE_PLOTS_DIR = 'sissor_project/plots'
+
 rule plot_hapcut2_results:
     params:
         job_name = "plot_hapcut2_sissor"
     input:
-        stats_file  = "{}/hapcut2.stats.p".format(config['error_rates_dir']),
-        labels_file = "{}/hapcut2.labels.p".format(config['error_rates_dir'])
+        stats_file  = "{}/hapcut2.stats.p".format(HAPLOTYPE_ERROR_RATES_DIR),
+        labels_file = "{}/hapcut2.labels.p".format(HAPLOTYPE_ERROR_RATES_DIR)
     output:
-        plot1 = "%s/sissor_haplotype_error_chromosome.png" % config['plots_dir'],
-        plot2 = "%s/sissor_haplotype_error_genome.png" % config['plots_dir']
+        plot2 = "%s/sissor_haplotype_error_genome.png" % HAPLOTYPE_PLOTS_DIR
     run:
         data = pickle.load(open(input.stats_file,"rb"))
         labels = pickle.load(open(input.labels_file,"rb"))
-        plot_data.plot_experiment_sissor(data[1:3],labels[1:3],[],output.plot1)
         plot_sissor(data,labels,output.plot2)
 
 exp =['cov1_none','cov1_basic','cov1_strict','cov2_basic']
@@ -75,7 +126,8 @@ rule calculate_error_rates:
         runtimes  = expand("{E}/hapcut2_PGP1_ALL/{exp}/{c}.runtime",E=experiments_dir,exp=exp,c=chroms),
         fragmats  = expand("{d}/PGP1_ALL/fragmat/{exp}/{c}",d=data_dir,exp=exp,c=chroms),
         var_vcfs  = expand("{v}/{c}.vcf",v=variant_vcf_dir,c=chroms),
-        bac_haps  = expand("{bac}/{c}.filtered",bac=config['BAC_hapblocks'], c=chroms)
+        bac_haps  = expand("{bac}/{c}.filtered",bac=config['BAC_hapblocks'], c=chroms),
+        contigsizefile = '/home/pedge/git/hapcut2/utilities/hg19.chrom.sizes'
     output:
         stats_file  = "{}/hapcut2.stats.p".format(config['error_rates_dir']),
         labels_file = "{}/hapcut2.labels.p".format(config['error_rates_dir'])
@@ -92,69 +144,50 @@ rule calculate_error_rates:
                 frag_file     = "{}/PGP1_ALL/fragmat/{}/{}".format(data_dir,x,c)
                 vcf_file      = "{}/{}.vcf".format(variant_vcf_dir,c)
                 truth_file    = "{}/{}.filtered".format(config['BAC_hapblocks'], c)
-                err = error_rates.hapblock_hapblock_error_rate(truth_file, assembly_file, frag_file, vcf_file, runtime_file)
+                err = chs.hapblock_hapblock_error_rate(truth_file, vcf_file, assembly_file, frag_file, vcf_file, input.contigsizefile)
                 datalist.append(err)
 
             print("{} results over all chromosomes:".format(x))
-            print(sum(datalist,error_rates.error_result()))
+            print(sum(datalist,chs.error_result()))
 
             data.append(datalist)
 
         pickle.dump(data,open(output.stats_file,"wb"))
         pickle.dump(labels,open(output.labels_file,"wb"))
+'''
 
-short_chrom_names = set([str(x) for x in range(1,23)]+['X','Y'])
-chrom_names = set(['chr'+str(x) for x in range(1,23)]+['chrX','chrY'])
+rule accuracy_aggregate:
+    params: job_name = 'accuracy_aggregate.{report_name,(within_cell|between_cell)}'
+    input:  counts = expand('sissor_project/experiments/strand_pair/{{report_name,(within_cell|between_cell)}}/split/{r}.counts.p',r=regions),
+            mof = expand('sissor_project/experiments/strand_pair/{{report_name,(within_cell|between_cell)}}/split/{r}.mismatches.txt',r=regions)
+    output: counts = 'sissor_project/experiments/strand_pair/{report_name,(within_cell|between_cell)}.counts.p',
+            mof = 'sissor_project/experiments/strand_pair/{report_name,(within_cell|between_cell)}.mismatches'
+    run:
+        accuracy_aggregate(input.counts,output.counts)
+        shell('cat {input.mof} > {output.mof}')
 
-def format_chrom(chrom_str):
-    if chrom_str in short_chrom_names:
-        chrom_str = 'chr' + chrom_str
-    if chrom_str not in chrom_names:
-        return False
-    return chrom_str
+rule freebayes_strand_pairing:
+    params: job_name = 'freebayes_strand_pairing.{r,chr([0-9]+|X|Y)\.[0-9]+\.[0-9]+}'
+    input: strand_pairs = 'strand_pairs/all',
+           vcfs = expand('sissor_project/data/{P[0]}/ploidy1_split/ch{P[1]}.{{r,chr([0-9]+|X|Y)\.[0-9]+\.[0-9]+}}.vcf',P=product(cells,chambers)),
+           gff = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/BAM/ns.gff',
+           fasta = '/oasis/tscc/scratch/pedge/data/genomes/hg19/hg19.fa',
+    output: counts = 'sissor_project/experiments/strand_pair/split/{r,chr([0-9]+|X|Y)\.[0-9]+\.[0-9]+}.counts.p',
+            mismatch_file = 'sissor_project/experiments/strand_pair/split/{r,chr([0-9]+|X|Y)\.[0-9]+\.[0-9]+}.mismatches.txt'
+    run:
+        freebayes_strand_pair(input.vcfs, input.strand_pairs, input.gff, input.fasta, output.counts, output.mismatch_file, same_cell_only)
 
 rule split_vcfs:
     params: job_name = 'split_vcf.{cell}.{ch}'
     input:  vcf = '{data_dir}/{cell}/ploidy1/ch{ch}.vcf'
-    output: split = expand('{{data_dir}}/{{cell}}/ploidy1_split/ch{{ch}}.{chrom}.vcf',chrom=chroms)
+    output: split = expand('{{data_dir}}/{{cell}}/ploidy1_split/ch{{ch}}.{r}.vcf',r=regions)
     run:
-        chroms_output = list(zip(chroms,output.split))
-        chrom,outputfile = chroms_output.pop(0)
-        output = open(outputfile, 'w+')
-        with open(input.vcf,'r') as vcf:
-            for line in vcf:
-                if line[0] == '#' or len(line) < 3:
-                    continue
+        split_vcf(input.vcf, chunklist, output.split)
 
-                vcf_line = line.strip().split('\t')
-                vcf_chrom = format_chrom(vcf_line[0])
-
-                if vcf_chrom != chrom:
-                    done = False
-                    while not (vcf_chrom == chrom):
-                        output.close()
-                        if len(chroms_output) == 0:
-                            done = True
-                            break
-                        chrom, outputfile = chroms_output.pop(0)
-                        output = open(outputfile, 'w+')
-                    if done:
-                        break
-
-                # write to lifted over vcf
-                print(line,end='',file=output)
-
-        while len(chroms_output) > 0:
-            output.close()
-            chrom, outputfile = chroms_output.pop(0)
-            output = open(outputfile, 'w+')
-
-        if not output.closed:
-            output.close()
 
 rule combine_paired_strand_files:
     params: job_name = 'combine_paired_strand_files'
-    input:  sep = expand('strand_pairs/{chrom}',chrom=chroms),
+    input:  sep = expand('strand_pairs/{chrom}',chrom=chroms+['chrXchrY']),
     output: combined = 'strand_pairs/all',
     shell:  'cat {input.sep} > {output.combined}'
 
@@ -167,6 +200,13 @@ rule pair_strands:
     run:
         strand_pairing_analysis.pair_strands(input.frag,input.vcf,output.sep,input.hap)
 
+rule pair_strands_XY:
+    params: job_name = 'pair_strands_XY'
+    input: beds = expand("{d}/{P[0]}/beds/ch{P[1]}.bed",d=data_dir,P=product(cells,chambers))
+    output: pairs = 'strand_pairs/chrXchrY'
+    run:
+        strand_pairing_analysis.pair_strands_XY(input.beds,output.pairs)
+'''
 # RUN HAPCUT2
 rule prune_haplotype:
     params:
@@ -177,7 +217,7 @@ rule prune_haplotype:
         hapblocks = expand("{E}/hapcut2_{{s}}/{{x}}/{c}.output",E=experiments_dir,c=chroms)
     run:
         for i, o in zip(input.hapblocks,output.hapblocks):
-            fileIO.prune_hapblock_file(i, o, snp_conf_cutoff=0.95, split_conf_cutoff=0.9999, use_refhap_heuristic=True)
+            fileIO.prune_hapblock_file(i, o, snp_conf_cutoff=0.95, split_conf_cutoff=0, use_refhap_heuristic=True)
 
 # RUN HAPCUT2
 rule run_hapcut2:
@@ -194,7 +234,7 @@ rule run_hapcut2:
         runtime = run_tools.run_hapcut2(config['hapcut2'], input.frag_file, input.vcf_file, output.hapblocks, 5, 0.8, '--ea 1')
         with open(output.runtime,'w') as rf:
             print(runtime, file=rf)
-
+'''
 # CREATE BED FILES FOR THE NEW FIXED FRAGMENTS
 rule make_fixed_beds:
     params:
@@ -288,7 +328,7 @@ rule create_augmented_fragmat:
     run:
         output_dir = os.path.join(data_dir,wildcards.s,'augmented_fragmat')
         create_hapcut_fragment_matrices_freebayes(input.ploidy1_vcfs, input.ploidy2_vcfs, input.beds, wildcards.s, chambers_pad, input.var_vcfs, output_dir, hets_in_seq=True)
-
+'''
 # simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
 rule simlinks:
     input:

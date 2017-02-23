@@ -8,6 +8,10 @@ __default__:
     ppn:             1
     walltime:        '20:00:00'
 
+freebayes_strand_pairing:
+    ppn: 1
+    walltime: '20:00:00'
+
 split_vcfs:
     ppn: 1
     walltime: '40:00:00'

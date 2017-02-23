@@ -6,7 +6,7 @@ error_rates_dir: sissor_project/error_rates
 plots_dir:       sissor_project/plots
 qsub_stdout_dir: sissor_project/stdout
 
-BAC_hapblocks:   /oasis/tscc/scratch/pedge/data/BAC
+BAC_hapblocks:   /home/pedge/git/SISSOR/haplotyping/data/BAC    #/oasis/tscc/scratch/pedge/data/BAC
 
 PGP1_21_ploidy1: /oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/nosegfreebayes #/oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/freebayes/ploidy1
 PGP1_22_ploidy1: /oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/previous/2016OctMergedBAM #/oasis/tscc/scratch/wkchu/SISSOR/PGP1_222/previous/freebayesploidy1

@@ -426,11 +426,7 @@ def parse_bedfile(input_file):
 
     return boundaries
 
-test1 = []
-for cell in ['PGP1_21','PGP1_22','PGP1_A1']:
-    for chamber in range(1,25):
-        test1.append('eric_fragment_boundary_beds/{}/ch{}.bed'.format(cell,chamber))
-def pair_strands_XY(bedfile_lst=test1,outfile='foobar.txt'):
+def pair_strands_XY(bedfile_lst,outfile):
 
     def filter_XY(bedlst):
         return [(chrom, start, stop) for (chrom, start, stop) in bedlst if chrom in ['chrX','chrY','X','Y']]
@@ -469,6 +465,7 @@ def pair_strands_XY(bedfile_lst=test1,outfile='foobar.txt'):
                             el = [chrom1,start_overlap,end_overlap,cell1,chamber1,cell2,chamber2]
                             line = '\t'.join([str(x) for x in el])
                             print(line,file=of)
+
 
 def test_pair_strands():
     #chroms = ['chr{}'.format(x) for x in range(1,23)]

@@ -8,6 +8,9 @@ __default__:
     ppn:             1
     walltime:        '10:00:00'
 
+accuracy_count_trichamber:
+    walltime: '20:00:00'
+
 het_vcf_file:
   walltime: '150:00:00'
 

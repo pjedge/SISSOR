@@ -22,10 +22,8 @@ localrules: all, simlinks, pileup_test
 # so 30 => 0.999 accuracy
 # and 50 => 0.99999 accuracy
 cutoffs = [7,8,9,10,30,50,70,90,110,130,150]
+#cutoffs = [10,50,130]
 
-paired_cutoffs = [20,30]
-
-het_vcf_cutoffs = list(range(1,6))
 chroms = ['chr{}'.format(i) for i in range(1,23)]
 chroms_XY = chroms + ['chrX','chrY']
 chunksize = int(5e6)
@@ -66,7 +64,9 @@ for chrom, chrlen in hg19_size_list:
         chunklist.append((chrom,start,end))
 
 regions = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in chunklist]
-#regions = ['chr6.135000001.140000000']
+
+#regions = regions[5:10]
+
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
 
@@ -94,13 +94,17 @@ HAPLOTYPE_PLOTS_DIR       = 'haplotyping/plots'
 HAPLOTYPE_EXP_DIR         = 'haplotyping/experiments'
 BAC_vcf_dir               = 'haplotyping/data/PGP1_VCFs_BACindex'
 
+modes = ['same_cell','all_cell','cross_cell']
 rule all:
     input:
         #"{}/sissor_haplotype_error_genome.png".format(HAPLOTYPE_PLOTS_DIR),
+        expand('accuracy_reports/{mode}/cutoff10.counts.p',mode=modes),
+        expand('accuracy_reports/{mode}/cutoff10.mismatches',mode=modes),
+        expand('accuracy_reports/strand_mismatch_{mode}/cutoff10.counts.p',mode=modes),
         #expand('accuracy_reports/paired_same_cell/cutoff{cut}.counts.p',cut=paired_cutoffs),
         #expand('accuracy_reports/paired_all_cells/cutoff{cut}.counts.p',cut=paired_cutoffs),
-        expand('accuracy_reports/unpaired/cutoff{cut}.counts.p',cut=cutoffs),
-        expand('accuracy_reports/ROC/cutoff{cut}.counts.p',cut=cutoffs),
+        #expand('accuracy_reports/unpaired/cutoff{cut}.counts.p',cut=cutoffs),
+        #expand('accuracy_reports/ROC/cutoff{cut}.counts.p',cut=cutoffs),
 
 
 rule het_vcf_file:
@@ -111,69 +115,46 @@ rule het_vcf_file:
     run:
         base_calls_to_vcf.base_calls_to_vcf(input.ccfs,(1.0-10**(-1*int(wildcards.cut))),output.vcf, output.ccf_het)
 
-rule accuracy_aggregate:
-    params: job_name = 'accuracy_aggregate.{cut}'
+rule accuracy_aggregate_counts:
+    params: job_name = 'accuracy_aggregate_counts.{report_name}.{cut}'
     input: counts = expand('accuracy_reports/{{report_name}}/split/{r}/{{cut}}/counts.p',r=regions),
-            mof = expand('accuracy_reports/{{report_name}}/split/{r}/{{cut}}/mismatches',r=regions),
     output: counts = 'accuracy_reports/{report_name}/cutoff{cut}.counts.p',
-            mof = 'accuracy_reports/{report_name}/cutoff{cut}.mismatches'
     run:
         caca.accuracy_aggregate(input.counts,output.counts)
-        shell('cat {input.mof} > {output.mof}')
 
-rule accuracy_count_ROC:
-    params: job_name = 'accuracy_count_ROC.{chrom}.{start}.{end}'
-    input:  ccf = 'base_calls/unpaired/{chrom}.{start}.{end}.out',
-            gff = CGI_SNPs1,
-            cgi_vcf  = CGI_SNPs2,
-            gms = 'gms/{chrom}.{start}.{end}.gms',
-            hg19 = HG19,
-            wgs_vcf = 'wgs/wgs_hg19.vcf',
-    output: counts_lst = expand('accuracy_reports/ROC/split/{{chrom}}.{{start}}.{{end}}/{cut}/counts.p',cut=cutoffs),
-            mof_lst = temp(expand('accuracy_reports/ROC/split/{{chrom}}.{{start}}.{{end}}/{cut}/mismatches',cut=cutoffs)),
-    run:
-        reg_chrom = str(wildcards.chrom)
-        reg_start = int(wildcards.start)
-        reg_end   = int(wildcards.end)
-        region = (reg_chrom, reg_start, reg_end)
-        for counts, mof, cut in zip(output.counts_lst, output.mof_lst, cutoffs):
-            caca.accuracy_count_single_strand_for_ROC(input.ccf, input.gff, input.wgs_vcf, input.cgi_vcf, input.gms, input.hg19, region, (1.0-10**(-0.1*float(cut))), counts, mof)
+rule accuracy_aggregate_mismatches:
+    params: job_name = 'accuracy_aggregate_mismatches.{cut}'
+    input:  mof = expand('accuracy_reports/{{report_name}}/split/{r}/{{cut}}/mismatches',r=regions),
+    output: mof = 'accuracy_reports/{report_name}/cutoff{cut}.mismatches'
+    shell:  'cat {input.mof} > {output.mof}'
 
-'''
-rule accuracy_aggregate_strand_pairing:
-    params: job_name = 'accuracy_aggregate_strand_pairing.{cut}'
-    input: counts = expand('accuracy_reports/{{report_name}}/split/{r}/{{cut}}/counts.p',r=regions),
-            mof = expand('accuracy_reports/{{report_name}}/split/{r}/{{cut}}/mismatches',r=regions),
-    output: counts = 'accuracy_reports/{report_name}/cutoff{cut}.counts.p',
-            mof = 'accuracy_reports/{report_name}/cutoff{cut}.mismatches'
-    run:
-        caca.accuracy_aggregate_strand_pairing(input.counts,output.counts)
-        shell('cat {input.mof} > {output.mof}')
-'''
-rule accuracy_count_strand_pairing:
-    params: job_name = 'accuracy_count_strand_pairing.{mode}.{chrom}.{start}.{end}'
-    input:  ccf = 'base_calls/paired/{chrom}.{start}.{end}.out',
-            gff = CGI_SNPs1,
+rule generate_truth_dict:
+    params: job_name = 'generate_truth_dict.{chrom}.{start}.{end}'
+    input:  gff = CGI_SNPs1,
             cgi_vcf  = CGI_SNPs2,
-            gms = 'gms/{chrom}.{start}.{end}.gms',
             hg19 = HG19,
             wgs_vcf = 'wgs/wgs_hg19.vcf'
-    output: counts_lst = temp(expand('accuracy_reports/paired_{{mode}}/split/{{chrom}}.{{start}}.{{end}}/{cut}/counts.p',cut=paired_cutoffs)),
-            mof_lst = temp(expand('accuracy_reports/paired_{{mode}}/split/{{chrom}}.{{start}}.{{end}}/{cut}/mismatches',cut=paired_cutoffs)),
+    output: pickle = 'truth_dicts/{chrom}.{start}.{end}.truth_dict.p'
     run:
         reg_chrom = str(wildcards.chrom)
         reg_start = int(wildcards.start)
         reg_end   = int(wildcards.end)
         region = (reg_chrom, reg_start, reg_end)
+        caca.generate_truth_dict(input.gff, input.wgs_vcf, input.cgi_vcf, input.hg19, region, output.pickle)
 
-        if wildcards.mode not in ['same_cell','all_cells']:
-            exit(1)
-        same_cell_only = (wildcards.mode == 'same_cell')
+rule accuracy_count_strand_pair:
+    params: job_name = 'accuracy_count_{mode}.{r}'
+    input:  ccf = 'base_calls/paired/{r}.out',
+            truth_dict = 'truth_dicts/{r}.truth_dict.p',
+            gms = 'gms/{r}.gms'
+    output: counts = temp('accuracy_reports/{mode}/split/{r}/10/counts.p'),
+            mof = temp('accuracy_reports/{mode}/split/{r}/10/mismatches'),
+            smf = temp('accuracy_reports/strand_mismatch_{mode}/split/{r}/10/counts.p')
+    run:
+        CUT = 0.9
+        caca.accuracy_count_strand_pairing(input.ccf, input.truth_dict, input.gms, CUT, output.counts, output.mof, output.smf,separate_haplotypes=True,mode=wildcards.mode)
 
-        for counts, mof, cut in zip(output.counts_lst, output.mof_lst, paired_cutoffs):
-            CUT = (1.0-10**(-0.1*float(cut))) if cut != None else None
-            caca.accuracy_count_strand_pairing_genomic(input.ccf, input.gff, input.wgs_vcf, input.cgi_vcf, input.gms, input.hg19, region, CUT, counts, mof, same_cell_only=same_cell_only)
-
+'''
 rule annotate_strand_pairs:
     params: job_name = 'annotate_strand_pairs.{r}'
     input:  ccf = 'base_calls/unpaired/{r}.out',
@@ -261,7 +242,7 @@ rule prune_haplotype:
     run:
         for i, o in zip(input.hapblocks,output.hapblocks):
             fileIO.prune_hapblock_file(i, o, snp_conf_cutoff=0.95, split_conf_cutoff=-1, use_refhap_heuristic=True) #split_conf_cutoff=0.9999
-
+'''
 # RUN HAPCUT2
 rule run_hapcut2:
     params:
@@ -275,7 +256,7 @@ rule run_hapcut2:
         '''
         {HAPCUT2} --fragments {input.frag_file} --vcf {input.vcf_file} --output {output.hapblocks} --ea 1
         '''
-
+'''
 # COMBINE FRAGMENT MATRICES
 rule fix_fragmat:
     params:
@@ -313,7 +294,7 @@ rule generate_fragmatrix:
         odir = 'haplotyping/data/PGP1_ALL/augmented_fragmat'
         # generate fragment matrix from sissorhands base calls
         create_hapcut_fragment_matrix_CCF(chamber_call_file=input.ccf, variant_vcf_files=input.vcfs,fragment_boundary_files=input.bounds, output_dir=odir)
-
+'''
 rule combine_filtered:
     params: job_name = 'combine_filtered'
     input:  ccf = expand('haplotyping/data/ccf_split/{r}.ccf',r=regions),
@@ -397,23 +378,15 @@ rule fix_fragmat_BAC:
         fix_chamber_contamination(input.frags,input.var_vcfs,output.fixed,threshold=2, min_coverage=0,mode='basic')
 
 rule accuracy_count_unpaired:
-    params: job_name = 'accuracy_count_unpaired.{chrom}.{start}.{end}'
-    input:  ccf = 'base_calls/unpaired/{chrom}.{start}.{end}.out',
-            gff = CGI_SNPs1,
-            cgi_vcf  = CGI_SNPs2,
-            gms = 'gms/{chrom}.{start}.{end}.gms',
-            hg19 = HG19,
-            wgs_vcf = 'wgs/wgs_hg19.vcf',
-            #bed_filter = 'eric_fragment_boundary_beds/sorted_merged.bed'
-    output: counts_lst = expand('accuracy_reports/unpaired/split/{{chrom}}.{{start}}.{{end}}/{cut}/counts.p',cut=cutoffs),
-            mof_lst = expand('accuracy_reports/unpaired/split/{{chrom}}.{{start}}.{{end}}/{cut}/mismatches',cut=cutoffs),
+    params: job_name = 'accuracy_count_unpaired.{r}'
+    input:  ccf = 'base_calls/unpaired/{r}.out',
+            truth_dict = 'truth_dicts/{r}.truth_dict.p',
+            gms = 'gms/{r}.gms'
+    output: counts_lst = expand('accuracy_reports/unpaired/split/{{r}}/{cut}/counts.p',cut=cutoffs),
+            mof_lst = expand('accuracy_reports/unpaired/split/{{r}}/{cut}/mismatches',cut=cutoffs),
     run:
-        reg_chrom = str(wildcards.chrom)
-        reg_start = int(wildcards.start)
-        reg_end   = int(wildcards.end)
-        region = (reg_chrom, reg_start, reg_end)
         for counts, mof, cut in zip(output.counts_lst, output.mof_lst, cutoffs):
-            caca.accuracy_count(input.ccf, input.gff, input.wgs_vcf, input.cgi_vcf, input.gms, input.hg19, region, (1.0-10**(-0.1*float(cut))), counts, mof)
+            caca.accuracy_count(input.ccf, input.truth_dict, input.gms, (1.0-10**(-0.1*float(cut))), counts, mof)
 
 rule liftover_wgs_SNPs:
     params: job_name  = 'liftover_SNPs',
