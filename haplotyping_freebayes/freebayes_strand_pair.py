@@ -465,18 +465,3 @@ def freebayes_strand_pair(input_files, fragment_assignment_file, gff_file, fasta
     for handle in input_files:
         handle.close()
 
-    print('Program complete.')
-
-
-def accuracy_aggregate(counts_pickle_files, pickle_outfile):
-
-    counts = defaultdict(int)
-
-    for pfile in counts_pickle_files:
-        temp_dict = pickle.load(open(pfile,'rb'))
-        for k,v in temp_dict.items():
-            counts[k] += v
-
-    pickle.dump(counts,open(pickle_outfile,'wb'))
-    #print("Strand Mismatch, not in CGI, divided by total:")
-    #print(sum([x[1] for x in counts.items() if x[0][1] != None and x[0][2] == True]) / sum([x[1] for x in counts.items() if x[0][1] != None]))

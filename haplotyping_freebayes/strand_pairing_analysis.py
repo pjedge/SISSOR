@@ -6,6 +6,8 @@ Created on Thu May 19 21:44:48 2016
 """
 import sys
 sys.path.append('/home/pedge/git/HapTools')
+sys.path.append('/home/peter/git/HapTools')
+
 #import fileIO
 import fragment
 import sys
@@ -482,5 +484,6 @@ def test_pair_strands():
     print(TOTAL)
 
 if __name__ == '__main__':
-    test_pair_strands()
+    pass
+    #test_pair_strands()
     #pair_strands()
