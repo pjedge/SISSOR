@@ -15,6 +15,7 @@ from DJSF import Union, Find, Node #MakeSet
 
 count_key = namedtuple('count_key', 'is_SNP matches_CGI CGI_genotype')
 count_key_sp = namedtuple('count_key_sp', 'is_SNP matches_CGI third_chamber_match')
+count_key_ind = namedtuple('count_key_ind', 'cell is_SNP matches_CGI third_chamber_match')
 
 GMS_LIMIT = 0.5
 chroms = ['chr{}'.format(i) for i in range(1,23)]
@@ -454,12 +455,12 @@ def accuracy_count(chamber_call_file, truth_dict_pickle, GMS_file, cutoff, count
 # mismatch_outfile prints locations of mismatched allele calls
 def accuracy_count_strand_pairing(chamber_call_file, truth_dict_pickle, GMS_file, cutoff, counts_pickle_file, mismatch_outfile, strand_mismatch_pickle, separate_haplotypes = True, mode='all_cell'): #WGS_VCF_file,
 
-    if mode not in ['same_cell','all_cell','cross_cell']:
+    if mode not in ['same_cell','all_cell','cross_cell','ind_same_cell']:
         raise ValueError('Invalid accuracy count mode.')
 
     same_cell  = False
     cross_cell = False
-    if mode == 'same_cell':
+    if mode == 'same_cell' or mode == 'ind_same_cell':
         same_cell = True
     if mode == 'cross_cell':
         cross_cell = True
@@ -578,9 +579,19 @@ def accuracy_count_strand_pairing(chamber_call_file, truth_dict_pickle, GMS_file
                     haplotype_pairs.append(((cell1,chamber1),(cell2,chamber2)))
 
             P1,P2 = hap_pairs_to_sets(haplotype_pairs)
-            P1_P2  = P1.union(P2)
 
-            hap_sets = [P1,P2] if separate_haplotypes else [P1_2]
+            if mode == 'ind_same_cell':
+                hap_sets = []
+                for hap_set in [P1,P2]:
+                    cell_dict = defaultdict(set)
+                    for hcell,hch in hap_set:
+                        cell_dict[hcell].add((hcell,hch))
+
+                    hap_sets += list(cell_dict.values())
+
+            else:
+                hap_sets = [P1,P2] if separate_haplotypes else [P1.union(P2)]
+
 
             random.shuffle(haplotype_pairs)
 
@@ -599,6 +610,10 @@ def accuracy_count_strand_pairing(chamber_call_file, truth_dict_pickle, GMS_file
                     if (cell1,chamber1) not in call_dict or (cell2,chamber2) not in call_dict:
                         continue
 
+                    # skip pair if we should only be comparing within cells
+                    if cell1 != cell2 and same_cell:
+                        continue
+
                     # only consider pair if it's in the current haplotype we're considering
                     if not ((cell1,chamber1) in hap_set and (cell2,chamber2) in hap_set):
                         assert((cell1,chamber1) not in hap_set)   # if one not in the haplotype, neither should be
@@ -609,16 +624,12 @@ def accuracy_count_strand_pairing(chamber_call_file, truth_dict_pickle, GMS_file
                     if cell1 == cell2 and cross_cell:
                         continue
 
-                    # skip pair if we should only be comparing within cells
-                    if cell1 != cell2 and same_cell:
-                        continue
-
                     allele1 = call_dict[(cell1,chamber1)]
                     allele2 = call_dict[(cell2,chamber2)]
 
                     if allele1 == allele2:
 
-                        strand_mismatch_counts['match'] += 1
+                        strand_mismatch_counts[((cell1,cell2),'match')] += 1
 
                         # don't replace the old strand pair if this one isn't a SNP
                         if matched_chambers != None and allele1 == {ref_allele}:
@@ -628,7 +639,7 @@ def accuracy_count_strand_pairing(chamber_call_file, truth_dict_pickle, GMS_file
                         matched_allele = allele1
 
                     else:
-                        strand_mismatch_counts['mismatch'] += 1
+                        strand_mismatch_counts[((cell1,cell2),'mismatch')] += 1
 
                 if matched_chambers == None:
                     continue
@@ -656,7 +667,12 @@ def accuracy_count_strand_pairing(chamber_call_file, truth_dict_pickle, GMS_file
                     print('\t'.join(el),file=mof)
 
                 SNV = matched_allele != {ref_allele}
-                counts[count_key_sp(SNV,CGI_MATCH,third_chamber_match)] += 1
+
+                if mode == 'ind_same_cell':
+                    assert(matched_chambers[0][0] == matched_chambers[1][0]) # have to be same cell...
+                    counts[count_key_ind(matched_chambers[0][0],SNV,CGI_MATCH,third_chamber_match)] += 1 # same as count_key_sp but also saves the cell.
+                else:
+                    counts[count_key_sp(SNV,CGI_MATCH,third_chamber_match)] += 1
 
     pickle.dump(counts,open(counts_pickle_file,'wb'))
     pickle.dump(strand_mismatch_counts,open(strand_mismatch_pickle,'wb'))
@@ -673,19 +689,27 @@ def accuracy_aggregate(counts_pickle_files, pickle_outfile):
     pickle.dump(counts,open(pickle_outfile,'wb'))
     #print("Strand Mismatch, not in CGI, divided by total:")
     #print(sum([x[1] for x in counts.items() if x[0][1] != None and x[0][2] == True]) / sum([x[1] for x in counts.items() if x[0][1] != None]))
-'''
-def generate_table(pickle_list):
 
-    countlist = []
-    # for each new file, we add its cutoff
-    for pickle_file in pickle_list:
+# all credit to Alex Martelli on stackoverflow for this function
+#http://stackoverflow.com/questions/2166818/python-how-to-check-if-an-object-is-an-instance-of-a-namedtuple
+def isnamedtupleinstance(x):
+    t = type(x)
+    b = t.__bases__
+    if len(b) != 1 or b[0] != tuple: return False
+    f = getattr(t, '_fields', None)
+    if not isinstance(f, tuple): return False
+    return all(type(n)==str for n in f)
 
-        countlist.append(pickle.load(open(pickle_file,'rb')))
-
-    table  = [list(countlist[0]._fields)]
-
-    uniq = set()
-
-    for count in countlist:
-        if uniq = uniq.union(set(count.keys()))
-'''
+def generate_table(pickle_file, output_file):
+    with open(output_file,'w') as outf:
+        counts = pickle.load(open(pickle_file,'rb'))
+        sample_key = list(counts.keys())[0]
+        if isnamedtupleinstance(sample_key):
+            header = list(sample_key._fields) + ['count']
+            print('\t'.join(header),file=outf)
+        for k,v in counts.items():
+            if type(k)==tuple or isnamedtupleinstance(k):
+                line = [(x if type(x)!=bool else int(x)) for x in k] + [v]
+            else:
+                line = [k,v]
+            print('\t'.join([str(x) for x in line]), file=outf)

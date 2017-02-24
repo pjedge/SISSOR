@@ -16,7 +16,7 @@ import run_tools
 import error_rates
 import fileIO
 
-localrules: all, simlinks, pileup_test
+localrules: all, simlinks, pileup_test, make_accuracy_table
 
 # cutoff values are phred scaled probability of error
 # so 30 => 0.999 accuracy
@@ -94,13 +94,15 @@ HAPLOTYPE_PLOTS_DIR       = 'haplotyping/plots'
 HAPLOTYPE_EXP_DIR         = 'haplotyping/experiments'
 BAC_vcf_dir               = 'haplotyping/data/PGP1_VCFs_BACindex'
 
-modes = ['same_cell','all_cell','cross_cell']
+modes = ['same_cell','all_cell','cross_cell','ind_same_cell']
 rule all:
     input:
+        expand('accuracy_reports/tables/{mode}.10.table.txt',mode=modes),
+        expand('accuracy_reports/tables/strand_mismatch_{mode}.10.table.txt',mode=modes),
         #"{}/sissor_haplotype_error_genome.png".format(HAPLOTYPE_PLOTS_DIR),
-        expand('accuracy_reports/{mode}/cutoff10.counts.p',mode=modes),
-        expand('accuracy_reports/{mode}/cutoff10.mismatches',mode=modes),
-        expand('accuracy_reports/strand_mismatch_{mode}/cutoff10.counts.p',mode=modes),
+        #expand('accuracy_reports/{mode}/cutoff10.counts.p',mode=modes),
+        #expand('accuracy_reports/{mode}/cutoff10.mismatches',mode=modes),
+        #expand('accuracy_reports/strand_mismatch_{mode}/cutoff10.counts.p',mode=modes),
         #expand('accuracy_reports/paired_same_cell/cutoff{cut}.counts.p',cut=paired_cutoffs),
         #expand('accuracy_reports/paired_all_cells/cutoff{cut}.counts.p',cut=paired_cutoffs),
         #expand('accuracy_reports/unpaired/cutoff{cut}.counts.p',cut=cutoffs),
@@ -114,6 +116,13 @@ rule het_vcf_file:
             ccf_het = 'het_vcfs/cutoff{cut}/whole_genome.out'
     run:
         base_calls_to_vcf.base_calls_to_vcf(input.ccfs,(1.0-10**(-1*int(wildcards.cut))),output.vcf, output.ccf_het)
+
+rule make_accuracy_table:
+    params: job_name = 'make_accuracy_table.{report_name}.{cut}'
+    input:  counts = 'accuracy_reports/{report_name}/cutoff{cut}.counts.p',
+    output: table = 'accuracy_reports/tables/{report_name}.{cut}.table.txt',
+    run:
+        caca.generate_table(input.counts, output.table)
 
 rule accuracy_aggregate_counts:
     params: job_name = 'accuracy_aggregate_counts.{report_name}.{cut}'
