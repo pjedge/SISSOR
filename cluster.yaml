@@ -8,6 +8,10 @@ __default__:
     ppn:             1
     walltime:        '10:00:00'
 
+bcftools_merged_chambers:
+    ppn: 1
+    walltime: '20:00:00'
+
 accuracy_count_trichamber:
     walltime: '20:00:00'
 

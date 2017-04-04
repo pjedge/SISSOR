@@ -65,7 +65,7 @@ for chrom, chrlen in hg19_size_list:
 
 regions = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in chunklist]
 
-#regions = regions[5:10]
+#regions = regions[5:6]
 
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
@@ -76,6 +76,7 @@ chambers_pad = ['{0:02d}'.format(c) for c in chambers]
 grams_DNA_before_MDA  = 0.25e-12  # 0.25 pg
 grams_DNA_after_MDA = 6e-9        # 6 ng
 
+BCFTOOLS = '/opt/biotools/bcftools/bin/bcftools'
 SAMTOOLS = '/opt/biotools/samtools/1.3/bin/samtools'
 PICARD   = '/home/pedge/installed/picard.jar'
 CROSSMAP = '/home/pedge/installed/opt/python/bin/CrossMap.py'
@@ -85,6 +86,33 @@ WGS_VCF_URL = 'https://www.encodeproject.org/files/ENCFF995BBX/@@download/ENCFF9
 HG19     = '/oasis/tscc/scratch/pedge/data/genomes/hg19/hg19.fa' #'/home/wkchu/zhang_lab_oasis/resources_v2.8_b37/human_g1k_v37_decoy.fasta'
 CGI_SNPs1 = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/BAM/ns.gff'
 CGI_SNPs2 = '/oasis/tscc/scratch/pedge/sissor_project/data/PGP1_VCFs_BACindex/all.vcf'
+BAC_VCFs = ['/home/wkchu/BACPoolPileup/Indx73.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx74.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx75.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx76.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx77.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx78.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx79.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx80.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx81.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx82.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx83.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx84.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx85.2.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx85.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx86.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx87.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx88.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx89.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx90.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx91.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx92.2.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx92.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx93.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx94.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx95.bac.pileup.vcf',
+'/home/wkchu/BACPoolPileup/Indx96.bac.pileup.vcf']
+
 PGP1_21_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/BAM'
 PGP1_22_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/2016OctMergedBAM'#'/oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/previous/BAM'
 PGP1_A1_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/2016OctMergedBAM'#'/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/HiSeqCombinedBAM'
@@ -95,19 +123,62 @@ HAPLOTYPE_EXP_DIR         = 'haplotyping/experiments'
 BAC_vcf_dir               = 'haplotyping/data/PGP1_VCFs_BACindex'
 
 modes = ['same_cell','all_cell','cross_cell','ind_same_cell']
+#modes = ['cross_cell']
 rule all:
     input:
-        expand('accuracy_reports/tables/{mode}.10.table.txt',mode=modes),
+        expand('accuracy_reports/{mode}/cutoff10.counts.p',mode=modes),
+        expand('accuracy_reports/{mode}/cutoff10.mismatches',mode=modes),
         expand('accuracy_reports/tables/strand_mismatch_{mode}.10.table.txt',mode=modes),
+
+        #'accuracy_reports/same_to_others/cutoff10.mismatches',
+        #'accuracy_reports/tables/same_to_others.10.table.txt'
+
+        #expand('bcftools_merged_chambers/{c}/{r}.vcf',c=cells,r=regions)
+        #'accuracy_reports/bcftools_merged/cutoff10.mismatches',
+        #expand('accuracy_reports/tables/bcftools_merged_{cell}.20.table.txt',cell=cells),
+
+        #expand('accuracy_reports/tables/{mode}.10.table.txt',mode=modes),
+        #expand('accuracy_reports/unpaired/cutoff{cut}.counts.p',cut=cutoffs),
+
         #"{}/sissor_haplotype_error_genome.png".format(HAPLOTYPE_PLOTS_DIR),
-        #expand('accuracy_reports/{mode}/cutoff10.counts.p',mode=modes),
-        #expand('accuracy_reports/{mode}/cutoff10.mismatches',mode=modes),
-        #expand('accuracy_reports/strand_mismatch_{mode}/cutoff10.counts.p',mode=modes),
+        #expand('accuracy_reports/strand_mismatch_{mode}/ qcutoff10.counts.p',mode=modes),
         #expand('accuracy_reports/paired_same_cell/cutoff{cut}.counts.p',cut=paired_cutoffs),
         #expand('accuracy_reports/paired_all_cells/cutoff{cut}.counts.p',cut=paired_cutoffs),
-        #expand('accuracy_reports/unpaired/cutoff{cut}.counts.p',cut=cutoffs),
         #expand('accuracy_reports/ROC/cutoff{cut}.counts.p',cut=cutoffs),
 
+#rule freebayes_merged_chambers:
+#    params:
+#        job_name  = 'freebayes_merged_chambers.{cell}.{chr}.{start}.{end}',
+#    input:  bam   = 'merged_bams/{cell}/{chr}.{start}.{end}.bam',
+#            bai   = 'merged_bams/{cell}/{chr}.{start}.{end}.bam.bai',
+#            ref   = HG19
+#    output: vcf = 'freebayes_merged_chambers/{cell}/{chr}.{start}.{end}.vcf'
+#    shell:
+#        '''
+#        freebayes -f {input.ref} \
+#        --standard-filters \
+#        --report-monomorphic \
+#        --region {wildcards.chr}:{wildcards.start}..{wildcards.end} \
+#         {input.bam} > {output.vcf}
+#        '''
+
+rule bcftools_merged_chambers:
+    params:
+        job_name  = 'bcftools_merged_chambers.{cell}.{chr}.{start}.{end}',
+    input:  bam   = 'merged_bams/{cell}/{chr}.{start}.{end}.bam',
+            bai   = 'merged_bams/{cell}/{chr}.{start}.{end}.bam.bai',
+            ref   = HG19
+    output: vcf = 'bcftools_merged_chambers/{cell}/{chr}.{start}.{end}.vcf'
+    shell:
+        '''
+        {SAMTOOLS} mpileup -guIR -C 50 --max-depth 100 -f {HG19} -r {wildcards.chr}:{wildcards.start}-{wildcards.end} {input.bam} | {BCFTOOLS} call -O v  -c - > {output.vcf}
+        '''
+
+rule merge_bam_region:
+    params: job_name = 'merge.{chrom}.{start}.{end}.{cell}'
+    input:  bams  = expand('bams/{{cell}}/ch{ch}.bam',ch=chambers)
+    output: bam  = 'merged_bams/{cell}/{chrom}.{start}.{end}.bam',
+    shell:  '{SAMTOOLS} merge -R {wildcards.chrom}:{wildcards.start}-{wildcards.end} {output.bam} {input.bams}'
 
 rule het_vcf_file:
     params: job_name = 'het_vcf_file.{cut}'
@@ -142,26 +213,52 @@ rule generate_truth_dict:
     input:  gff = CGI_SNPs1,
             cgi_vcf  = CGI_SNPs2,
             hg19 = HG19,
-            wgs_vcf = 'wgs/wgs_hg19.vcf'
+            wgs_vcf = 'wgs/wgs_hg19.vcf',
+            bac_vcfs = BAC_VCFs
     output: pickle = 'truth_dicts/{chrom}.{start}.{end}.truth_dict.p'
     run:
         reg_chrom = str(wildcards.chrom)
         reg_start = int(wildcards.start)
         reg_end   = int(wildcards.end)
         region = (reg_chrom, reg_start, reg_end)
-        caca.generate_truth_dict(input.gff, input.wgs_vcf, input.cgi_vcf, input.hg19, region, output.pickle)
+        caca.generate_truth_dict(input.gff, input.wgs_vcf, input.cgi_vcf, input.bac_vcfs, input.hg19, region, output.pickle)
+
+rule accuracy_count_unpaired:
+    params: job_name = 'accuracy_count_unpaired.{r}'
+    input:  ccf = 'base_calls/unpaired/{r}.out',
+            truth_dict = 'truth_dicts/{r}.truth_dict.p',
+            gms = 'gms/{r}.gms'
+    output: counts_lst = expand('accuracy_reports/unpaired/split/{{r}}/{cut}/counts.p',cut=cutoffs),
+            mof_lst = expand('accuracy_reports/unpaired/split/{{r}}/{cut}/mismatches',cut=cutoffs),
+    run:
+        for counts, mof, cut in zip(output.counts_lst, output.mof_lst, cutoffs):
+            caca.accuracy_count(input.ccf, input.truth_dict, input.gms, (1.0-10**(-0.1*float(cut))), counts, mof)
 
 rule accuracy_count_strand_pair:
-    params: job_name = 'accuracy_count_{mode}.{r}'
+    params: job_name = 'accuracy_count_{mode,(same_cell|all_cell|cross_cell|ind_same_cell|same_to_others)}.{r}'
     input:  ccf = 'base_calls/paired/{r}.out',
             truth_dict = 'truth_dicts/{r}.truth_dict.p',
             gms = 'gms/{r}.gms'
-    output: counts = temp('accuracy_reports/{mode}/split/{r}/10/counts.p'),
-            mof = temp('accuracy_reports/{mode}/split/{r}/10/mismatches'),
-            smf = temp('accuracy_reports/strand_mismatch_{mode}/split/{r}/10/counts.p')
+    output: counts = 'accuracy_reports/{mode,(same_cell|all_cell|cross_cell|ind_same_cell|same_to_others)}/split/{r}/10/counts.p',
+            mof = 'accuracy_reports/{mode,(same_cell|all_cell|cross_cell|ind_same_cell|same_to_others)}/split/{r}/10/mismatches',
+            smf = 'accuracy_reports/strand_mismatch_{mode,(same_cell|all_cell|cross_cell|ind_same_cell|same_to_others)}/split/{r}/10/counts.p'
     run:
+
         CUT = 0.9
-        caca.accuracy_count_strand_pairing(input.ccf, input.truth_dict, input.gms, CUT, output.counts, output.mof, output.smf,separate_haplotypes=True,mode=wildcards.mode)
+        if wildcards.mode == 'same_to_others':
+            caca.accuracy_count_strand_pairing(input.ccf, input.truth_dict, input.gms, CUT, output.counts, output.mof, output.smf,separate_haplotypes=False,mode=wildcards.mode)
+            shell('touch {output.smf}')
+        else:
+            caca.accuracy_count_strand_pairing(input.ccf, input.truth_dict, input.gms, CUT, output.counts, output.mof, output.smf,separate_haplotypes=True,mode=wildcards.mode)
+
+rule accuracy_count_bcftools:
+    params: job_name = 'accuracy_count_bcftools_merged.{cell}.{r}'
+    input:  vcf = 'bcftools_merged_chambers/{cell}/{r}.vcf',
+            truth_dict = 'truth_dicts/{r}.truth_dict.p',
+    output: counts = 'accuracy_reports/bcftools_merged_{cell}/split/{r}/20/counts.p',
+            mof = 'accuracy_reports/bcftools_merged_{cell}/split/{r}/20/mismatches',
+    run:
+        caca.accuracy_count_bcftools_merged(input.vcf, input.truth_dict, output.counts, output.mof)
 
 '''
 rule annotate_strand_pairs:
@@ -386,17 +483,6 @@ rule fix_fragmat_BAC:
     run:
         fix_chamber_contamination(input.frags,input.var_vcfs,output.fixed,threshold=2, min_coverage=0,mode='basic')
 
-rule accuracy_count_unpaired:
-    params: job_name = 'accuracy_count_unpaired.{r}'
-    input:  ccf = 'base_calls/unpaired/{r}.out',
-            truth_dict = 'truth_dicts/{r}.truth_dict.p',
-            gms = 'gms/{r}.gms'
-    output: counts_lst = expand('accuracy_reports/unpaired/split/{{r}}/{cut}/counts.p',cut=cutoffs),
-            mof_lst = expand('accuracy_reports/unpaired/split/{{r}}/{cut}/mismatches',cut=cutoffs),
-    run:
-        for counts, mof, cut in zip(output.counts_lst, output.mof_lst, cutoffs):
-            caca.accuracy_count(input.ccf, input.truth_dict, input.gms, (1.0-10**(-0.1*float(cut))), counts, mof)
-
 rule liftover_wgs_SNPs:
     params: job_name  = 'liftover_SNPs',
     input:  vcf = 'wgs/wgs_grch38.vcf',
@@ -502,9 +588,9 @@ rule pileup:
     shell:  '{SAMTOOLS} mpileup --region {params.chrom}:{params.start}-{params.stop} --adjust-MQ 50 --max-depth 100 --output-MQ --min-MQ 30 --min-BQ 20 --fasta-ref {HG19} --output {output.pileup} {input.bams}'
 
 rule index_bam:
-    params: job_name = 'index_bam{ce}.{ch}'
-    input:  bam = 'bams/{ce}/ch{ch}.bam'
-    output: bai = 'bams/{ce}/ch{ch}.bam.bai'
+    params: job_name = lambda wildcards: 'index_bam.{}'.format(str(wildcards.x).replace("/", "."))
+    input:  bam = '{x}.bam'
+    output: bai = '{x}.bam.bai'
     shell:  '{SAMTOOLS} index {input.bam} {output.bai}'
 
 # PGP1_22 and PGP1_A1 don't have chr before chromosome labels. necessary for pileup to include reference
@@ -522,8 +608,8 @@ rule bam2sam:
     input:  'bams/{ce}/old.ch{ch}.bam'
     output: temp(rules.fix_sam.input)
     shell: '{SAMTOOLS} view -h {input} > {output}'
-'''
 # simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
+'''
 rule simlinks:
     run:
         for ch,chpad in zip(chambers,chambers_pad):
