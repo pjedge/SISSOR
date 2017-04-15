@@ -13,6 +13,7 @@ from plot_sissor import plot_sissor
 from create_hapcut_fragment_matrix_CCF import create_hapcut_fragment_matrix_CCF
 from fix_chamber_contamination import fix_chamber_contamination
 import run_tools
+import fragment
 import error_rates
 import fileIO
 
