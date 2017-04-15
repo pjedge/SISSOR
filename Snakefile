@@ -126,9 +126,10 @@ modes = ['same_cell','all_cell','cross_cell','ind_same_cell']
 #modes = ['cross_cell']
 rule all:
     input:
-        expand('accuracy_reports/{mode}/cutoff10.counts.p',mode=modes),
-        expand('accuracy_reports/{mode}/cutoff10.mismatches',mode=modes),
-        expand('accuracy_reports/tables/strand_mismatch_{mode}.10.table.txt',mode=modes),
+        expand('haplotyping/fragment_fragment_error/{c}.p',c=chroms)
+        #expand('accuracy_reports/{mode}/cutoff10.counts.p',mode=modes),
+        #expand('accuracy_reports/{mode}/cutoff10.mismatches',mode=modes),
+        #expand('accuracy_reports/tables/strand_mismatch_{mode}.10.table.txt',mode=modes),
 
         #'accuracy_reports/same_to_others/cutoff10.mismatches',
         #'accuracy_reports/tables/same_to_others.10.table.txt'
@@ -161,6 +162,19 @@ rule all:
 #        --region {wildcards.chr}:{wildcards.start}..{wildcards.end} \
 #         {input.bam} > {output.vcf}
 #        '''
+
+rule fragment_fragment_error_rate:
+    params:
+        job_name  = 'fragment_fragment_error_rate.{chrom}',
+    input:  sissor = 'merged_bams/{cell}/{chr}.{start}.{end}.bam',
+            bac    = 'haplotyping/data/PGP1_ALL/fragmat/cov1_strict/{c}',
+            vcf    = 'haplotyping/data/PGP1_VCFs_BACindex/{c}.vcf'
+    output: f1     = 'haplotyping/fragment_fragment_error/{c}.sissor_fragment_error',
+            f2     = 'haplotyping/fragment_fragment_error/{c}.visualization',
+            f3     = 'haplotyping/fragment_fragment_error/{c}.p'
+    run:
+        fragment.fragment_fragment_error_rate(input.sissor, input.bac, input.vcf, output.f1, output.f2, output.f3)
+
 
 rule bcftools_merged_chambers:
     params:

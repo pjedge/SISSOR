@@ -6,7 +6,9 @@ Created on Sat Jul  9 16:35:02 2016
 @author: peter
 """
 
-
+import sys
+import fileIO
+import error_rates
 
 class fragment:
 
@@ -16,7 +18,7 @@ class fragment:
         self.switch_errors = switch_errors     # list of SNP index positions where switch errors were found
         self.mismatch_errors = mismatch_errors # list of SNP index positions where mismatch errors occured
         self.haplotype = None
-        
+
     def __str__(self):
         fragstr = ''
         num_pairs = 0
@@ -107,7 +109,7 @@ def write_fragment_matrix(flist,outfile):
         for firstpos, line in lines:
             print(line, file=opf)
 
-def matrixify_flist(flist, outfile=None):
+def matrixify_flist(flist, o=None):
 
     max_ix = 0
     max_name = 0
@@ -123,18 +125,17 @@ def matrixify_flist(flist, outfile=None):
 
                 max_ix = a[0]
 
-    if outfile != None:
-        with open(outfile,'w') as o:
-            for f in flist:
+    if o != None:
+        for f in flist:
 
-                line = ['-'] * (max_ix+1)
-                for a in f.seq:
-                    line[a[0]] = a[2]
+            line = ['-'] * (max_ix+1)
+            for a in f.seq:
+                line[a[0]] = a[2]
 
-                line = [f.name.ljust(max_name+1)] + line
-                pline = ''.join(line)
+            line = [f.name.ljust(max_name+1)] + line
+            pline = ''.join(line)
 
-                print(pline,file=o)
+            print(pline,file=o)
     else:
         for f in flist:
 
@@ -147,13 +148,16 @@ def matrixify_flist(flist, outfile=None):
 
             print(pline)
 
-# compute error rates by using another haplotype block file as ground truth
-def fragment_hapblock_error_rate(truth_file, frag_file, vcf_file, outfile,chamber_filter=None):
+def overlap(f1, f2, amt=1):
 
-    import sys
-    sys.path.append("/home/peter/git/HapTools")
-    import fileIO
-    import error_rates
+    s1 = set([a[0] for a in f1.seq])
+    s2 = set([a[0] for a in f2.seq])
+    inter = set.intersection(s1,s2)
+
+    return len(inter) >= amt
+
+# compute error rates by using another haplotype block file as ground truth
+def fragment_fragment_error_rate(sissor_frags, bac_frags, vcf_file, outfile, vis_outfile, pickle_outfile, chamber_filter=None):
 
     snp_ix = 0
     vcf_dict = dict()
@@ -170,18 +174,12 @@ def fragment_hapblock_error_rate(truth_file, frag_file, vcf_file, outfile,chambe
             snp_ix += 1
 
     # parse and get stuff to compute error rates
-    flist = read_fragment_matrix(frag_file,vcf_file)
-    new_flist = []
-    for f in flist:
-        new_seq = [(pos,gpos,call,qual) for (pos,gpos,call,qual) in f.seq if call != '2']
-        new_flist.append(fragment(new_seq,f.name))
-    flist = new_flist
-
-    t_blocklist = fileIO.parse_hapblock_file(truth_file,use_SNP_index=True)
+    flist_sissor = read_fragment_matrix(sissor_frags,vcf_file)
+    flist_bac = read_fragment_matrix(bac_frags,vcf_file)
+    ref_name = fileIO.get_ref_name(vcf_file)
     num_snps    = fileIO.count_SNPs(vcf_file)
-    num_covered = sum(error_rates.find_covered_positions(frag_file, num_snps))
-    ref_name    = fileIO.get_ref_name(vcf_file)
-    # compute error result object, update the runtime and AN50 / completeness
+    num_covered = sum(error_rates.find_covered_positions(sissor_frags, num_snps))
+
     def flip(allele):
         if allele == '1':
             return '0'
@@ -193,29 +191,79 @@ def fragment_hapblock_error_rate(truth_file, frag_file, vcf_file, outfile,chambe
             print("ERROR")
             exit(0)
 
-    swloc = dict()
-    mmloc = dict()
-    err_rates = dict()
+    total_switch_count   = 0
+    total_mismatch_count = 0
+    total_poss_mm        = 0
 
-    with open(outfile,'w') as OUTFILE:
-        print("FRAG_ID\tREF_NAME\tSWITCH_CT\tPOSS_SW\tMISMATCH_CT\tPOSS_MM\tSWITCH_LOC\tMISMATCH_LOC",file=OUTFILE)
-        for f in flist:
+    with open(outfile,'w') as OUTFILE, open(vis_outfile,'w') as VIS_OUTFILE:
+        #print("FRAG_ID\tREF_NAME\tSWITCH_CT\tPOSS_SW\tMISMATCH_CT\tPOSS_MM\tSWITCH_LOC\tMISMATCH_LOC",file=OUTFILE)
+        for frag_sissor in flist_sissor:
 
-            if chamber_filter != None and ':CH{0:02d}:'.format(chamber_filter) not in f.name:
+            if chamber_filter != None and ':CH{0:02d}:'.format(chamber_filter) not in frag_sissor.name:
                 continue
-            fragment_as_block = [(snp_ix, allele, flip(allele)) for (snp_ix,g_ix,allele,qual) in f.seq]
+            fragment_as_block = [(snp_ix, allele, flip(allele)) for (snp_ix,g_ix,allele,qual) in frag_sissor.seq]
 
-            err = error_rates.error_rate_calc(t_blocklist, [fragment_as_block], num_snps, num_covered, ref_name, track_error_positions=True)
+            bac_overlaps      = [f for f in flist_bac if overlap(f, frag_sissor)]
+            bac_blocks        = [[(snp_ix, allele, flip(allele)) for (snp_ix,g_ix,allele,qual) in bo.seq] for bo in bac_overlaps]
 
-            switchpos   = [vcf_dict[x]+1 for x in err.switch_loc[ref_name]]
-            mismatchpos = [vcf_dict[x]+1 for x in err.mismatch_loc[ref_name]]
+            #err = error_rates.error_rate_calc(bac_blocks, [fragment_as_block], vcf_file)
+
             #reslist = [fragment.name,ref_name,err.switch_count, err.poss_sw, err.mismatch_count, err.poss_mm,switchpos,mismatchpos]
-            swloc[f.name] = switchpos
-            mmloc[f.name] = mismatchpos
-            err_rates[f.name] = err.get_switch_mismatch_rate()
+            #swloc[f.name] = switchpos
+            #mmloc[f.name] = mismatchpos
+            #err_rates[f.name] = err.get_switch_mismatch_rate()
             #err_rates[name] = err.get_switch_rate()
+            fragment_switch_count = 0
+            fragment_mismatch_count = 0
+            fragment_poss_mm = 0
+
+            for f, blk in zip(bac_overlaps, bac_blocks):
+                err = error_rates.error_rate_calc([blk], [fragment_as_block], vcf_file)
+                current_switch_count = err.get_switch_count()
+                current_mismatch_count = err.get_mismatch_count()
+                current_poss_mm = err.get_poss_mm()
+                fragment_switch_count += current_switch_count
+                fragment_mismatch_count += current_mismatch_count
+                fragment_poss_mm += current_poss_mm
+
+                errseq = []
+                for sw_loc in err.switch_loc[ref_name]:
+                    errseq.append((sw_loc,vcf_dict[sw_loc],'S',1))
+                for mm_loc in err.mismatch_loc[ref_name]:
+                    errseq.append((mm_loc,vcf_dict[mm_loc],'M',1))
+
+                assert(len(errseq) == current_switch_count + current_mismatch_count)
+
+                print("switches:   {}".format(current_switch_count),file=VIS_OUTFILE)
+                print("mismatches: {}".format(current_mismatch_count),file=VIS_OUTFILE)
+                print("positions:  {}".format(current_poss_mm),file=VIS_OUTFILE)
+                print("error rate: {}".format((current_switch_count + current_mismatch_count)/current_poss_mm),file=VIS_OUTFILE) if current_poss_mm > 0 else 0
+
+                errseq.sort()
+                error_vis = fragment(errseq,"ERRORS")
+                fragment_vis = [frag_sissor,f,error_vis]
+                matrixify_flist(fragment_vis,VIS_OUTFILE)
+                pos_str = " ".join(["{}:{}".format(ref_name,x[1]+1) for x in errseq])
+                print("err pos:    {}".format(pos_str),file=VIS_OUTFILE)
+                print("\n***********************************************************************\n",file=VIS_OUTFILE)
+
+            err_rate = (fragment_switch_count + fragment_mismatch_count)/fragment_poss_mm if fragment_poss_mm > 0 else 0
+            print("{}\t{}\t{}\t{}\t{}".format(frag_sissor.name,err_rate, fragment_switch_count,fragment_mismatch_count,fragment_poss_mm),file=OUTFILE)
+                #print("{}:{}:{}\t".format(f.name,err.get_switch_count(),err.get_mismatch_count()),file=OUTFILE,end='')
 
             #print("\t".join([str(x) for x in reslist]),file=OUTFILE)
+            total_switch_count += fragment_switch_count
+            total_mismatch_count += fragment_mismatch_count
+            total_poss_mm        += fragment_poss_mm
 
-    #return err_rates
-    return swloc, mmloc,err_rates
+
+    print("switches:   {}".format(total_switch_count))
+    print("mismatches: {}".format(total_mismatch_count))
+    print("positions:  {}".format(total_poss_mm))
+    print("error rate: {}".format((total_switch_count + total_mismatch_count)/total_poss_mm)) if total_poss_mm > 0 else 0
+    res_tuple = (total_switch_count,total_mismatch_count,total_poss_mm)
+    pickle.dump(res_tuple,open(pickle_outfile,'rb'))
+
+    #return swloc, mmloc,err_rates
+
+#fragment_fragment_error_rate('haplotyping/sissor_project/data/PGP1_ALL/fragmat/cov1_strict/chr20', 'haplotyping/sissor_project/data/BAC_frags/chr20', 'haplotyping/sissor_project/data/PGP1_VCFs_BACindex/chr20.vcf', 'sissor_bac_fragments_error.txt', 'sissor_bac_visualization.txt',chamber_filter=None)

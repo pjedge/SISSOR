@@ -5,6 +5,7 @@ Created on Thu May 19 21:44:48 2016
 @author: peter
 """
 import sys
+sys.path.append('/home/peter/git/HapTools')
 sys.path.append('/home/pedge/git/HapTools')
 #import fileIO
 import fragment
@@ -44,7 +45,7 @@ tinylog = -1e5
 n_chambers = 24
 n_cells = 3
 
-THRESHOLD = 0.9 # fraction of match to say haplotype is the same
+THRESHOLD = 0.8 #0.9 # fraction of match to say haplotype is the same
 filter_inconsistent_haplotypes = False
 OVERLAP1 = 3
 OVERLAP2 = 3
@@ -404,6 +405,45 @@ def pair_strands(fragmentfile, vcf_file, outputfile, haplotype_file):
     total = assign_fragments(flist, outputfile, haplotype_file)
 
     return total
+
+def count_not_matchable(fragmentfile, vcf_file, haplotype_file):
+
+    flist = fragment.read_fragment_matrix(fragmentfile, vcf_file)
+     # convert t_block to a dict for convenience
+    haplotype_dict = None
+    if haplotype_file != None:
+        haplotype_dict = defaultdict(lambda: '-')
+        t_blocklist = fileIO.parse_hapblock_file(haplotype_file,use_SNP_index=False)
+        for t_block in t_blocklist:
+            for i, a1, a2 in t_block:
+                haplotype_dict[i] = a1 # index by genomic pos (1-indexed), return one haplotype
+
+    unmatchable = defaultdict(int)
+    for f1 in flist:
+        el1 = f1.name.split(':')
+        start1, end1 = [int(x) for x in el1[-1].split('-')]
+        cell = el1[2]
+        match1 = 0
+        total1 = 0
+
+        for (snp_ix, gen_ix, a, q) in f1.seq:  # s1:
+            if haplotype_dict[gen_ix] not in ['0', '1'] or a not in ['0', '1']:
+                continue
+            if haplotype_dict[gen_ix] == a:
+                match1 += 1
+            total1 += 1
+
+        if total1 < 1:
+
+            unmatchable[(cell,'too_short')] += end1 - start1
+
+
+        elif not (match1/total1 > THRESHOLD or 1-match1/total1 > THRESHOLD):
+
+            unmatchable[(cell,'mismatch')] += end1 - start1
+
+    return unmatchable
+
 
 def test_pair_strands():
     #chroms = ['chr{}'.format(x) for x in range(1,23)]
