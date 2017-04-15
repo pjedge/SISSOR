@@ -167,7 +167,7 @@ rule fragment_fragment_error_rate:
     params:
         job_name  = 'fragment_fragment_error_rate.{c}',
     input:  sissor = 'haplotyping/data/PGP1_ALL/fragmat/cov1_strict/{c}',
-            bac    = 'haplotyping/sissor_project/data/BAC_frags/{c}',
+            bac    = 'haplotyping/data/BAC_frags/{c}',
             vcf    = 'haplotyping/data/PGP1_VCFs_BACindex/{c}.vcf'
     output: f1     = 'haplotyping/fragment_fragment_error/{c}.sissor_fragment_error',
             f2     = 'haplotyping/fragment_fragment_error/{c}.visualization',
