@@ -537,6 +537,8 @@ def error_rate_calc(t_blocklist, a_blocklist, vcf_file, frag_file=None, runtime_
     missing_loc    = []
     AN50_spanlst   = []
     N50_spanlst    = []
+    num_ref = 0
+    num_alt = 0
 
     for blk in a_blocklist_double_index:
 
@@ -568,6 +570,7 @@ def error_rate_calc(t_blocklist, a_blocklist, vcf_file, frag_file=None, runtime_
         if blk_phased > maxblk_snps:
             maxblk_snps = blk_phased
     last_comparison = None
+    last_allele = None
     for t_block in t_blocklist:
 
         switched       = False
@@ -585,6 +588,7 @@ def error_rate_calc(t_blocklist, a_blocklist, vcf_file, frag_file=None, runtime_
             blk_switches    = [0,0]
             blk_mismatches  = [0,0]
             blk_switchlist  = [[],[]]
+            switch_alleles  = []
             blk_mmlist      = [[],[]]
             for a in [0,1]: # choose which allele to score. this only makes a difference for minimizing switch errors vs mismatches in corner cases.
 
@@ -608,6 +612,7 @@ def error_rate_calc(t_blocklist, a_blocklist, vcf_file, frag_file=None, runtime_
                             last_base_was_switch = False
                         first_SNP = False
                         last_comparison = i
+                        last_allele = y
                         continue
 
                     # if there is a mismatch against the true haplotype and we are in a normal state,
@@ -621,11 +626,23 @@ def error_rate_calc(t_blocklist, a_blocklist, vcf_file, frag_file=None, runtime_
                             blk_mismatches[a] += 1
 
 
+
                             blk_switches[a] -= 1      # undo count from last base switch
                             if len(blk_switchlist[a]) > 0:
                                 blk_mmlist[a].append(blk_switchlist[a].pop())
+                                if a == 0:
+                                    if switch_alleles.pop() == '0':
+                                        num_ref += 1
+                                    else:
+                                        num_alt += 1
                             else:
                                 blk_mmlist[a].append(last_comparison)
+                                if a == 0:
+
+                                    if last_allele == '0':
+                                        num_ref += 1
+                                    else:
+                                        num_alt += 1
                             if (blk_switches[a] < 0):
                                 blk_switches[a] = 0
                             last_base_was_switch = False
@@ -634,6 +651,7 @@ def error_rate_calc(t_blocklist, a_blocklist, vcf_file, frag_file=None, runtime_
 
                             blk_switches[a] += 1
                             blk_switchlist[a].append(i)
+                            switch_alleles.append(y)
                             last_base_was_switch = True
 
                     else: # current base is not mismatched
@@ -648,8 +666,20 @@ def error_rate_calc(t_blocklist, a_blocklist, vcf_file, frag_file=None, runtime_
                     blk_switches[a] -= 1
                     if len(blk_switchlist[a]) > 0:
                         blk_mmlist[a].append(blk_switchlist[a].pop())
+                        if a == 0:
+
+                            if switch_alleles.pop() == '0':
+                                num_ref += 1
+                            else:
+                                num_alt += 1
                     else:
                         blk_mmlist[a].append(last_comparison)
+                        if a == 0:
+
+                            if last_allele == '0':
+                                num_ref += 1
+                            else:
+                                num_alt += 1
 
                     if (blk_switches[a] < 0):
                         blk_switches[a] = 0
@@ -724,4 +754,4 @@ def error_rate_calc(t_blocklist, a_blocklist, vcf_file, frag_file=None, runtime_
              AN50_spanlst=AN50_spanlst,N50_spanlst=N50_spanlst,switch_loc=switch_loc,
              mismatch_loc=mismatch_loc,missing_loc=missing_loc)
 
-    return total_error
+    return total_error, num_ref, num_alt

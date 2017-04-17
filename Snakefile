@@ -7,7 +7,7 @@ import chamber_allele_call_accuracy as caca
 import base_calls_to_vcf
 import strand_pairing_analysis
 from itertools import product
-sys.path.append('/home/pedge/git/HapTools')
+#sys.path.append('/home/pedge/git/HapTools')
 import fileIO
 from plot_sissor import plot_sissor
 from create_hapcut_fragment_matrix_CCF import create_hapcut_fragment_matrix_CCF
@@ -121,7 +121,8 @@ PGP1_A1_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/2016OctMergedBAM'#'/oasi
 HAPLOTYPE_ERROR_RATES_DIR = 'haplotyping/error_rates'
 HAPLOTYPE_PLOTS_DIR       = 'haplotyping/plots'
 HAPLOTYPE_EXP_DIR         = 'haplotyping/experiments'
-BAC_vcf_dir               = 'haplotyping/data/PGP1_VCFs_BACindex'
+BAC_vcf_dir               = 'haplotyping/data/PGP1_VCFs_BACindex.intersected'
+BAC_vcf_dir_old               = 'haplotyping/data/PGP1_VCFs_BACindex'
 
 modes = ['same_cell','all_cell','cross_cell','ind_same_cell']
 #modes = ['cross_cell']
@@ -299,7 +300,7 @@ rule pair_strands:
     run:
         strand_pairing_analysis.pair_strands(input.frag,input.vcf,output.sep,input.hap)
 
-
+'''
 # PLOT RESULTS
 rule plot_hapcut2_results:
     params:
@@ -340,7 +341,7 @@ rule calculate_error_rates:
                 frag_file     = "haplotyping/data/PGP1_ALL/fragmat/{}/{}".format(x,c)
                 vcf_file      = "{}/{}.vcf".format(BAC_vcf_dir,c)
                 truth_file    = "haplotyping/data/BAC/{}.filtered".format(c)
-                err = error_rates.hapblock_hapblock_error_rate(truth_file, assembly_file, frag_file, vcf_file, runtime_file, use_SNP_index=True)
+                err = error_rates.hapblock_hapblock_error_rate(truth_file, assembly_file, frag_file, vcf_file, runtime_file, use_SNP_index=False)
                 datalist.append(err)
 
             print("{} results over all chromosomes:".format(x))
@@ -363,7 +364,7 @@ rule prune_haplotype:
     run:
         for i, o in zip(input.hapblocks,output.hapblocks):
             fileIO.prune_hapblock_file(i, o, snp_conf_cutoff=0.95, split_conf_cutoff=-1, use_refhap_heuristic=True) #split_conf_cutoff=0.9999
-'''
+
 # RUN HAPCUT2
 rule run_hapcut2:
     params:
@@ -377,7 +378,7 @@ rule run_hapcut2:
         '''
         {HAPCUT2} --fragments {input.frag_file} --vcf {input.vcf_file} --output {output.hapblocks} --ea 1
         '''
-'''
+
 # COMBINE FRAGMENT MATRICES
 rule fix_fragmat:
     params:
@@ -415,7 +416,7 @@ rule generate_fragmatrix:
         odir = 'haplotyping/data/PGP1_ALL/augmented_fragmat'
         # generate fragment matrix from sissorhands base calls
         create_hapcut_fragment_matrix_CCF(chamber_call_file=input.ccf, variant_vcf_files=input.vcfs,fragment_boundary_files=input.bounds, output_dir=odir)
-'''
+
 rule combine_filtered:
     params: job_name = 'combine_filtered'
     input:  ccf = expand('haplotyping/data/ccf_split/{r}.ccf',r=regions),
@@ -478,7 +479,7 @@ rule run_hapcut2_BAC:
         job_name = "{c}.BAC.hapcut2",
     input:
         frag_file = "haplotyping/data/BAC_frags_fixed/{c}",
-        vcf_file  = "%s/{c}.vcf" % BAC_vcf_dir
+        vcf_file  = "%s/{c}.vcf" % BAC_vcf_dir_old
     output:
         hapblocks = "haplotyping/data/BAC/{c}"
     shell:
@@ -491,12 +492,20 @@ rule fix_fragmat_BAC:
     params:
         job_name  = "fix_fragmat_BAC_{c}",
     input:
-        var_vcfs = "%s/{c}.vcf" % BAC_vcf_dir,
+        var_vcfs = "%s/{c}.vcf" % BAC_vcf_dir_old,
         frags = "haplotyping/data/BAC_frags/{c}"
     output:
         fixed = "haplotyping/data/BAC_frags_fixed/{c}"
     run:
         fix_chamber_contamination(input.frags,input.var_vcfs,output.fixed,threshold=2, min_coverage=0,mode='basic')
+
+rule filter_CGI_VCF:
+    params: job_name  = "filter_CGI_VCF",
+    input: vcfs = expand("{d}/{c}.vcf",d=BAC_vcf_dir_old,c=chrom)
+           filter_set = "/oasis/tscc/scratch/wkchu/SISSOR/NewPGP1REF/PGP-Harvard-var-hu43860C-20160106T060652Z.vcf"
+    output: vcfs = expand("{d}/{c}.vcf",d=BAC_vcf_dir,c=chrom)
+    run:
+        filter_vcf.filter_vcf(input.vcfs,output.vcfs,input.filter_set)
 
 rule liftover_wgs_SNPs:
     params: job_name  = 'liftover_SNPs',

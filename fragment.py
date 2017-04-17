@@ -9,6 +9,7 @@ Created on Sat Jul  9 16:35:02 2016
 import sys
 import fileIO
 import error_rates
+import pickle
 
 class fragment:
 
@@ -113,6 +114,7 @@ def matrixify_flist(flist, o=None):
 
     max_ix = 0
     max_name = 0
+    min_ix = min([f.seq[0][0] if len(f.seq) > 0 else int(1e9) for f in flist])
 
     for f in flist:
 
@@ -128,9 +130,9 @@ def matrixify_flist(flist, o=None):
     if o != None:
         for f in flist:
 
-            line = ['-'] * (max_ix+1)
+            line = ['-'] * (max_ix+1-min_ix)
             for a in f.seq:
-                line[a[0]] = a[2]
+                line[a[0] - min_ix] = a[2]
 
             line = [f.name.ljust(max_name+1)] + line
             pline = ''.join(line)
@@ -139,9 +141,9 @@ def matrixify_flist(flist, o=None):
     else:
         for f in flist:
 
-            line = ['-'] * (max_ix+1)
+            line = ['-'] * (max_ix+1 - min_ix)
             for a in f.seq:
-                line[a[0]] = a[2]
+                line[a[0] - min_ix] = a[2]
 
             line = [f.name.ljust(max_name+1)] + line
             pline = ''.join(line)
@@ -197,6 +199,8 @@ def fragment_fragment_error_rate(sissor_frags, bac_frags, vcf_file, outfile, vis
 
     with open(outfile,'w') as OUTFILE, open(vis_outfile,'w') as VIS_OUTFILE:
         #print("FRAG_ID\tREF_NAME\tSWITCH_CT\tPOSS_SW\tMISMATCH_CT\tPOSS_MM\tSWITCH_LOC\tMISMATCH_LOC",file=OUTFILE)
+        total_num_ref = 0
+        total_num_alt = 0
         for frag_sissor in flist_sissor:
 
             if chamber_filter != None and ':CH{0:02d}:'.format(chamber_filter) not in frag_sissor.name:
@@ -218,7 +222,10 @@ def fragment_fragment_error_rate(sissor_frags, bac_frags, vcf_file, outfile, vis
             fragment_poss_mm = 0
 
             for f, blk in zip(bac_overlaps, bac_blocks):
-                err = error_rates.error_rate_calc([blk], [fragment_as_block], vcf_file)
+                err, num_ref, num_alt = error_rates.error_rate_calc([blk], [fragment_as_block], vcf_file)
+                total_num_ref += num_ref
+                total_num_alt += num_alt
+                print("{} {}".format(total_num_ref,total_num_alt))
                 current_switch_count = err.get_switch_count()
                 current_mismatch_count = err.get_mismatch_count()
                 current_poss_mm = err.get_poss_mm()
@@ -261,9 +268,12 @@ def fragment_fragment_error_rate(sissor_frags, bac_frags, vcf_file, outfile, vis
     print("mismatches: {}".format(total_mismatch_count))
     print("positions:  {}".format(total_poss_mm))
     print("error rate: {}".format((total_switch_count + total_mismatch_count)/total_poss_mm)) if total_poss_mm > 0 else 0
+    print("num ref mm: {}".format(total_num_ref))
+    print("num alt mm: {}".format(total_num_alt))
+
     res_tuple = (total_switch_count,total_mismatch_count,total_poss_mm)
-    pickle.dump(res_tuple,open(pickle_outfile,'rb'))
+    pickle.dump(res_tuple,open(pickle_outfile,'wb'))
 
     #return swloc, mmloc,err_rates
 
-#fragment_fragment_error_rate('haplotyping/sissor_project/data/PGP1_ALL/fragmat/cov1_strict/chr20', 'haplotyping/sissor_project/data/BAC_frags/chr20', 'haplotyping/sissor_project/data/PGP1_VCFs_BACindex/chr20.vcf', 'sissor_bac_fragments_error.txt', 'sissor_bac_visualization.txt',chamber_filter=None)
+fragment_fragment_error_rate('haplotyping/sissor_project/data/PGP1_ALL/fragmat/cov1_strict/chr20', 'haplotyping/sissor_project/data/BAC_frags/chr20', 'haplotyping/sissor_project/data/PGP1_VCFs_BACindex/chr20.vcf', 'sissor_bac_fragments_error.txt', 'sissor_bac_visualization.txt','sissor_bac_pickle.p',chamber_filter=None)
