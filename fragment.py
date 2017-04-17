@@ -9,6 +9,7 @@ Created on Sat Jul  9 16:35:02 2016
 import sys
 import fileIO
 import error_rates
+import pickle
 
 class fragment:
 
@@ -113,6 +114,7 @@ def matrixify_flist(flist, o=None):
 
     max_ix = 0
     max_name = 0
+    min_ix = min([f.seq[0][0] if len(f.seq) > 0 else int(1e9) for f in flist])
 
     for f in flist:
 
@@ -128,9 +130,9 @@ def matrixify_flist(flist, o=None):
     if o != None:
         for f in flist:
 
-            line = ['-'] * (max_ix+1)
+            line = ['-'] * (max_ix+1-min_ix)
             for a in f.seq:
-                line[a[0]] = a[2]
+                line[a[0] - min_ix] = a[2]
 
             line = [f.name.ljust(max_name+1)] + line
             pline = ''.join(line)
@@ -139,9 +141,9 @@ def matrixify_flist(flist, o=None):
     else:
         for f in flist:
 
-            line = ['-'] * (max_ix+1)
+            line = ['-'] * (max_ix+1 - min_ix)
             for a in f.seq:
-                line[a[0]] = a[2]
+                line[a[0] - min_ix] = a[2]
 
             line = [f.name.ljust(max_name+1)] + line
             pline = ''.join(line)
@@ -262,8 +264,8 @@ def fragment_fragment_error_rate(sissor_frags, bac_frags, vcf_file, outfile, vis
     print("positions:  {}".format(total_poss_mm))
     print("error rate: {}".format((total_switch_count + total_mismatch_count)/total_poss_mm)) if total_poss_mm > 0 else 0
     res_tuple = (total_switch_count,total_mismatch_count,total_poss_mm)
-    pickle.dump(res_tuple,open(pickle_outfile,'rb'))
+    pickle.dump(res_tuple,open(pickle_outfile,'wb'))
 
     #return swloc, mmloc,err_rates
 
-#fragment_fragment_error_rate('haplotyping/sissor_project/data/PGP1_ALL/fragmat/cov1_strict/chr20', 'haplotyping/sissor_project/data/BAC_frags/chr20', 'haplotyping/sissor_project/data/PGP1_VCFs_BACindex/chr20.vcf', 'sissor_bac_fragments_error.txt', 'sissor_bac_visualization.txt',chamber_filter=None)
+#fragment_fragment_error_rate('haplotyping/sissor_project/data/PGP1_ALL/fragmat/cov1_strict/chr20', 'haplotyping/sissor_project/data/BAC_frags/chr20', 'haplotyping/sissor_project/data/PGP1_VCFs_BACindex/chr20.vcf', 'sissor_bac_fragments_error.txt', 'sissor_bac_visualization.txt','sissor_bac_pickle.p',chamber_filter=None)
