@@ -199,6 +199,8 @@ def fragment_fragment_error_rate(sissor_frags, bac_frags, vcf_file, outfile, vis
 
     with open(outfile,'w') as OUTFILE, open(vis_outfile,'w') as VIS_OUTFILE:
         #print("FRAG_ID\tREF_NAME\tSWITCH_CT\tPOSS_SW\tMISMATCH_CT\tPOSS_MM\tSWITCH_LOC\tMISMATCH_LOC",file=OUTFILE)
+        total_num_ref = 0
+        total_num_alt = 0
         for frag_sissor in flist_sissor:
 
             if chamber_filter != None and ':CH{0:02d}:'.format(chamber_filter) not in frag_sissor.name:
@@ -220,7 +222,10 @@ def fragment_fragment_error_rate(sissor_frags, bac_frags, vcf_file, outfile, vis
             fragment_poss_mm = 0
 
             for f, blk in zip(bac_overlaps, bac_blocks):
-                err = error_rates.error_rate_calc([blk], [fragment_as_block], vcf_file)
+                err, num_ref, num_alt = error_rates.error_rate_calc([blk], [fragment_as_block], vcf_file)
+                total_num_ref += num_ref
+                total_num_alt += num_alt
+                print("{} {}".format(total_num_ref,total_num_alt))
                 current_switch_count = err.get_switch_count()
                 current_mismatch_count = err.get_mismatch_count()
                 current_poss_mm = err.get_poss_mm()
@@ -263,6 +268,9 @@ def fragment_fragment_error_rate(sissor_frags, bac_frags, vcf_file, outfile, vis
     print("mismatches: {}".format(total_mismatch_count))
     print("positions:  {}".format(total_poss_mm))
     print("error rate: {}".format((total_switch_count + total_mismatch_count)/total_poss_mm)) if total_poss_mm > 0 else 0
+    print("num ref mm: {}".format(total_num_ref))
+    print("num alt mm: {}".format(total_num_alt))
+
     res_tuple = (total_switch_count,total_mismatch_count,total_poss_mm)
     pickle.dump(res_tuple,open(pickle_outfile,'wb'))
 
