@@ -754,4 +754,5 @@ def error_rate_calc(t_blocklist, a_blocklist, vcf_file, frag_file=None, runtime_
              AN50_spanlst=AN50_spanlst,N50_spanlst=N50_spanlst,switch_loc=switch_loc,
              mismatch_loc=mismatch_loc,missing_loc=missing_loc)
 
-    return total_error, num_ref, num_alt
+
+    return total_error

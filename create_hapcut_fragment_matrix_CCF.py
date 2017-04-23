@@ -2,15 +2,18 @@ from collections import defaultdict
 import os
 from math import log10
 #import sys
+from math import log10
+
 
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
 
 n_cells = 3
 n_chambers = 24
-XCHAMBER = False
+XCHAMBER = True
 MIN_BASE_PROB = 0.9 #MIN_Q    = 30
-MIN_COV  = 4
+MIN_COV  = 5
+MAX_QUAL = 30
 
 chroms = ['chr{}'.format(x) for x in range(1,23)] + ['chrX','chrY']
 chrom_num = dict()
@@ -69,7 +72,7 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file, variant_vcf_files, frag
 
     #fragment_list[i][j] is the jth fragment
     fragment_list = [[[]] for i in range(n_chambers*n_cells)]
-
+    inconsistent_ref_alleles = 0
     with open(chamber_call_file,'r') as ccf:
         #print('chr\tpos\tsissor_call\tCGI_allele\tref',file=mof)
 
@@ -86,8 +89,10 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file, variant_vcf_files, frag
 
             ref_allele = {ccf_line[2]}
 
-            assert({ref_allele2} == ref_allele)
-
+            #assert({ref_allele2} == ref_allele)
+            if {ref_allele2} != ref_allele:
+                inconsistent_ref_alleles += 1
+                continue
 
             if ccf_chrom in ['chrX','chrY']:
                 continue
@@ -206,7 +211,11 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file, variant_vcf_files, frag
                 #    p_err = 1e-10
                 #qual = int(-10 * log10(p_err))
 
-                q_char = '5' # q_char = '~' if qual>=93 else chr(33 + qual)
+                qual = int(-10*log10(1.0-max_prob)) if 1.0-max_prob > 0 else MAX_QUAL
+                if qual > MAX_QUAL:
+                    qual = MAX_QUAL
+
+                q_char = '5' # chr(33 + qual)
 
                 fragment_list[i][-1].append((snp_ix, ccf_chrom, ccf_pos, binary_allele, q_char, frg_start, frg_end, cell, ch_num))
 
@@ -263,6 +272,9 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file, variant_vcf_files, frag
         with open(output_fragment_file, 'w') as opf:
             for firstpos, line in lines[chrom]:
                 print(line, file=opf)
+
+    if inconsistent_ref_alleles > 0:
+        print("WARNING: there were {} positions with inconsistent reference alleles between CCF file and VCF.".format(inconsistent_ref_alleles))
 
 if __name__ == '__main__':
     create_hapcut_fragment_matrix_CCF()

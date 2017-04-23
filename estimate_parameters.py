@@ -96,7 +96,7 @@ def weighted_choice_bisect_compile(items):
 # MAIN FUNCTIONS AND PARSING
 ###############################################################################
 
-def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
+def estimate_parameters(suffixes):
 
     chrX_MDA_fracs = dict()#defaultdict(lambda: )
     chrX_covs = defaultdict(int)
@@ -139,7 +139,7 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
         lst = [c / total for c in chrX_MDA_fracs[k]]
         for j in range(k*10+1,(k+1)*10+1):
             MDA_dist[j] = lst
-        
+
 
     minval = min([a for a,b in chrX_covs.items()])
     # we assume that coverages below the postion coverage cutoff have frequency
@@ -147,7 +147,7 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
     # it'll be an underestimation but it should be ok
     for i in range(0,minval):
         chrX_covs[i] = chrX_covs[minval]
-            
+
     chrX_covs_tuple = list(chrX_covs.items())
     total = sum([b for a,b in chrX_covs_tuple])
     chrX_covs_probs = [(a,b/total) for a,b in chrX_covs_tuple]
@@ -190,12 +190,12 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
         lst = condense(cov_frac_dist_raw[i], binsize)
         if lst == []:
             lst = last_lst
-        
+
         for j in range(int(len(lst)/2)):
             val = (lst[j] + lst[len(lst)-j-1]) / 2  # mean of values on symmetrical sides of distribution
             lst[j] = val
             lst[len(lst)-j-1] = val
-        
+
         for j in range(i,i+NUM_BINS):
             cov_frac_dist[j] = lst
         last_lst = lst
@@ -357,8 +357,8 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
     # ESTIMATE PER-BASE PROBABILITY OF MDA ERROR
     # formula from this paper: http://journals.plos.org/plosone/article?id=10.1371/journal.pone.0105585
 
-    GAIN = grams_DNA_after_MDA / grams_DNA_before_MDA
-    omega = log10(3.2e-6 / 2 * math.log2(GAIN)) # probability of MDA error.
+    #GAIN = grams_DNA_after_MDA / grams_DNA_before_MDA
+    #omega = log10(3.2e-6 / 2 * math.log2(GAIN)) # probability of MDA error.
 
    # WRITE PARAMETERS TO PICKLE FILES
     pickle.dump(MDA_dist, open("parameters/MDA_dist.p", "wb"))
@@ -373,7 +373,7 @@ def estimate_parameters(suffixes, grams_DNA_before_MDA, grams_DNA_after_MDA):
     pickle.dump(het_config_probs, open("parameters/het_config_probs.p","wb"))
     pickle.dump(diploid_genotype_priors, open("parameters/diploid_genotype_priors.p","wb"))
     pickle.dump(haploid_genotype_priors, open("parameters/haploid_genotype_priors.p","wb"))
-    pickle.dump(omega, open("parameters/omega.p","wb"))
+    #pickle.dump(omega, open("parameters/omega.p","wb"))
 
 def obtain_counts_parallel(input_file, boundary_files=None, suffix=''):
 

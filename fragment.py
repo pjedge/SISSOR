@@ -273,4 +273,4 @@ def fragment_fragment_error_rate(sissor_frags, bac_frags, vcf_file, outfile, vis
 
     #return swloc, mmloc,err_rates
 
-fragment_fragment_error_rate('haplotyping/sissor_project/data/PGP1_ALL/fragmat/cov1_strict/chr20', 'haplotyping/sissor_project/data/BAC_frags/chr20', 'haplotyping/sissor_project/data/PGP1_VCFs_BACindex/chr20.vcf', 'sissor_bac_fragments_error.txt', 'sissor_bac_visualization.txt','sissor_bac_pickle.p',chamber_filter=None)
+#fragment_fragment_error_rate('haplotyping/sissor_project/data/PGP1_ALL/fragmat/cov1_strict/chr20', 'haplotyping/sissor_project/data/BAC_frags/chr20', 'haplotyping/sissor_project/data/PGP1_VCFs_BACindex/chr20.vcf', 'sissor_bac_fragments_error.txt', 'sissor_bac_visualization.txt','sissor_bac_pickle.p',chamber_filter=None)

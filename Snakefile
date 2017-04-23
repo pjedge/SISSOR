@@ -5,27 +5,28 @@ import estimate_parameters
 import fix_sam
 import chamber_allele_call_accuracy as caca
 import base_calls_to_vcf
-import strand_pairing_analysis
+import fragment_haplotype_assignment
 from itertools import product
 #sys.path.append('/home/pedge/git/HapTools')
 import fileIO
 from plot_sissor import plot_sissor
 from create_hapcut_fragment_matrix_CCF import create_hapcut_fragment_matrix_CCF
 from fix_chamber_contamination import fix_chamber_contamination
-import run_tools
+#import run_tools
 import fragment
-import error_rates
 import fileIO
 
+import filter_vcf
+import calculate_haplotype_statistics as chs
 localrules: all, simlinks, pileup_test, make_accuracy_table
 
 # cutoff values are phred scaled probability of error
 # so 30 => 0.999 accuracy
 # and 50 => 0.99999 accuracy
-cutoffs = [7,8,9,10,30,50,70,90,110,130,150]
-#cutoffs = [10,50,130]
+variant_calling_cutoffs = [7,8,9,10,30,50,70,90,110,130,150]
 
 chroms = ['chr{}'.format(i) for i in range(1,23)]
+chroms_set = set(chroms)
 chroms_XY = chroms + ['chrX','chrY']
 chunksize = int(5e6)
 
@@ -66,7 +67,7 @@ for chrom, chrlen in hg19_size_list:
 
 regions = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in chunklist]
 
-#regions = regions[5:6]
+#regions = regions[5:8]
 
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
@@ -74,8 +75,6 @@ chambers = list(range(1,25))
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
 chambers_pad = ['{0:02d}'.format(c) for c in chambers]
-grams_DNA_before_MDA  = 0.25e-12  # 0.25 pg
-grams_DNA_after_MDA = 6e-9        # 6 ng
 
 BCFTOOLS = '/opt/biotools/bcftools/bin/bcftools'
 SAMTOOLS = '/opt/biotools/samtools/1.3/bin/samtools'
@@ -86,7 +85,7 @@ PYPY     = '/home/pedge/installed/pypy3.3-5.5-alpha-20161013-linux_x86_64-portab
 WGS_VCF_URL = 'https://www.encodeproject.org/files/ENCFF995BBX/@@download/ENCFF995BBX.vcf.gz'
 HG19     = '/oasis/tscc/scratch/pedge/data/genomes/hg19/hg19.fa' #'/home/wkchu/zhang_lab_oasis/resources_v2.8_b37/human_g1k_v37_decoy.fasta'
 CGI_SNPs1 = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/BAM/ns.gff'
-CGI_SNPs2 = '/oasis/tscc/scratch/pedge/sissor_project/data/PGP1_VCFs_BACindex/all.vcf'
+CGI_SNPs2 = '/oasis/tscc/scratch/wkchu/SISSOR/NewPGP1REF/PGP-Harvard-var-hu43860C-20160106T060652Z.vcf'
 BAC_VCFs = ['/home/wkchu/BACPoolPileup/Indx73.bac.pileup.vcf',
 '/home/wkchu/BACPoolPileup/Indx74.bac.pileup.vcf',
 '/home/wkchu/BACPoolPileup/Indx75.bac.pileup.vcf',
@@ -121,88 +120,23 @@ PGP1_A1_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/2016OctMergedBAM'#'/oasi
 HAPLOTYPE_ERROR_RATES_DIR = 'haplotyping/error_rates'
 HAPLOTYPE_PLOTS_DIR       = 'haplotyping/plots'
 HAPLOTYPE_EXP_DIR         = 'haplotyping/experiments'
-BAC_vcf_dir               = 'haplotyping/data/PGP1_VCFs_BACindex.intersected'
-BAC_vcf_dir_old               = 'haplotyping/data/PGP1_VCFs_BACindex'
+
+haplotyping_VCF_dir      = 'haplotyping/data/haplotyping_VCFs'
+BAC_VCF_dir    = 'haplotyping/data/PGP1_VCFs_BACindex'
 
 modes = ['same_cell','all_cell','cross_cell','ind_same_cell']
 #modes = ['cross_cell']
 rule all:
     input:
-        expand('haplotyping/fragment_fragment_error/{c}.p',c=chroms)
-        #expand('accuracy_reports/{mode}/cutoff10.counts.p',mode=modes),
-        #expand('accuracy_reports/{mode}/cutoff10.mismatches',mode=modes),
-        #expand('accuracy_reports/tables/strand_mismatch_{mode}.10.table.txt',mode=modes),
+        expand('accuracy_reports/{mode}/cutoff10.counts.p',mode=modes),
+        expand('accuracy_reports/{mode}/cutoff10.mismatches',mode=modes),
+        expand('accuracy_reports/tables/strand_mismatch_{mode}.10.table.txt',mode=modes),
+        'accuracy_reports/tables/unphased.10.table.txt',
 
-        #'accuracy_reports/same_to_others/cutoff10.mismatches',
-        #'accuracy_reports/tables/same_to_others.10.table.txt'
-
-        #expand('bcftools_merged_chambers/{c}/{r}.vcf',c=cells,r=regions)
-        #'accuracy_reports/bcftools_merged/cutoff10.mismatches',
-        #expand('accuracy_reports/tables/bcftools_merged_{cell}.20.table.txt',cell=cells),
-
-        #expand('accuracy_reports/tables/{mode}.10.table.txt',mode=modes),
-        #expand('accuracy_reports/unpaired/cutoff{cut}.counts.p',cut=cutoffs),
-
+        #expand('accuracy_reports/unphased/cutoff{cut}.counts.p',cut=variant_calling_cutoffs),
         #"{}/sissor_haplotype_error_genome.png".format(HAPLOTYPE_PLOTS_DIR),
-        #expand('accuracy_reports/strand_mismatch_{mode}/ qcutoff10.counts.p',mode=modes),
-        #expand('accuracy_reports/paired_same_cell/cutoff{cut}.counts.p',cut=paired_cutoffs),
-        #expand('accuracy_reports/paired_all_cells/cutoff{cut}.counts.p',cut=paired_cutoffs),
-        #expand('accuracy_reports/ROC/cutoff{cut}.counts.p',cut=cutoffs),
-
-#rule freebayes_merged_chambers:
-#    params:
-#        job_name  = 'freebayes_merged_chambers.{cell}.{chr}.{start}.{end}',
-#    input:  bam   = 'merged_bams/{cell}/{chr}.{start}.{end}.bam',
-#            bai   = 'merged_bams/{cell}/{chr}.{start}.{end}.bam.bai',
-#            ref   = HG19
-#    output: vcf = 'freebayes_merged_chambers/{cell}/{chr}.{start}.{end}.vcf'
-#    shell:
-#        '''
-#        freebayes -f {input.ref} \
-#        --standard-filters \
-#        --report-monomorphic \
-#        --region {wildcards.chr}:{wildcards.start}..{wildcards.end} \
-#         {input.bam} > {output.vcf}
-#        '''
-
-rule fragment_fragment_error_rate:
-    params:
-        job_name  = 'fragment_fragment_error_rate.{c}',
-    input:  sissor = 'haplotyping/data/PGP1_ALL/fragmat/cov1_strict/{c}',
-            bac    = 'haplotyping/data/BAC_frags/{c}',
-            vcf    = 'haplotyping/data/PGP1_VCFs_BACindex/{c}.vcf'
-    output: f1     = 'haplotyping/fragment_fragment_error/{c}.sissor_fragment_error',
-            f2     = 'haplotyping/fragment_fragment_error/{c}.visualization',
-            f3     = 'haplotyping/fragment_fragment_error/{c}.p'
-    run:
-        fragment.fragment_fragment_error_rate(input.sissor, input.bac, input.vcf, output.f1, output.f2, output.f3)
-
-
-rule bcftools_merged_chambers:
-    params:
-        job_name  = 'bcftools_merged_chambers.{cell}.{chr}.{start}.{end}',
-    input:  bam   = 'merged_bams/{cell}/{chr}.{start}.{end}.bam',
-            bai   = 'merged_bams/{cell}/{chr}.{start}.{end}.bam.bai',
-            ref   = HG19
-    output: vcf = 'bcftools_merged_chambers/{cell}/{chr}.{start}.{end}.vcf'
-    shell:
-        '''
-        {SAMTOOLS} mpileup -guIR -C 50 --max-depth 100 -f {HG19} -r {wildcards.chr}:{wildcards.start}-{wildcards.end} {input.bam} | {BCFTOOLS} call -O v  -c - > {output.vcf}
-        '''
-
-rule merge_bam_region:
-    params: job_name = 'merge.{chrom}.{start}.{end}.{cell}'
-    input:  bams  = expand('bams/{{cell}}/ch{ch}.bam',ch=chambers)
-    output: bam  = 'merged_bams/{cell}/{chrom}.{start}.{end}.bam',
-    shell:  '{SAMTOOLS} merge -R {wildcards.chrom}:{wildcards.start}-{wildcards.end} {output.bam} {input.bams}'
-
-rule het_vcf_file:
-    params: job_name = 'het_vcf_file.{cut}'
-    input:  ccfs    = expand('base_calls/unpaired/{r}.out',r=regions)
-    output: vcf     = 'het_vcfs/cutoff{cut}/whole_genome.vcf',
-            ccf_het = 'het_vcfs/cutoff{cut}/whole_genome.out'
-    run:
-        base_calls_to_vcf.base_calls_to_vcf(input.ccfs,(1.0-10**(-1*int(wildcards.cut))),output.vcf, output.ccf_het)
+        #expand('ref_dicts/{r}.ref_dict.p',r=regions),
+        #expand('accuracy_reports/tables/{mode}.10.table.txt',mode=modes),
 
 rule make_accuracy_table:
     params: job_name = 'make_accuracy_table.{report_name}.{cut}'
@@ -224,83 +158,70 @@ rule accuracy_aggregate_mismatches:
     output: mof = 'accuracy_reports/{report_name}/cutoff{cut}.mismatches'
     shell:  'cat {input.mof} > {output.mof}'
 
-rule generate_truth_dict:
-    params: job_name = 'generate_truth_dict.{chrom}.{start}.{end}'
+rule generate_ref_dict:
+    params: job_name = 'generate_ref_dict.{chrom}.{start}.{end}'
     input:  gff = CGI_SNPs1,
             cgi_vcf  = CGI_SNPs2,
             hg19 = HG19,
             wgs_vcf = 'wgs/wgs_hg19.vcf',
             bac_vcfs = BAC_VCFs
-    output: pickle = 'truth_dicts/{chrom}.{start}.{end}.truth_dict.p'
+    output: pickle = 'ref_dicts/{chrom}.{start}.{end}.ref_dict.p'
     run:
         reg_chrom = str(wildcards.chrom)
         reg_start = int(wildcards.start)
         reg_end   = int(wildcards.end)
         region = (reg_chrom, reg_start, reg_end)
-        caca.generate_truth_dict(input.gff, input.wgs_vcf, input.cgi_vcf, input.bac_vcfs, input.hg19, region, output.pickle)
+        caca.generate_ref_dict(input.gff, input.wgs_vcf, input.cgi_vcf, input.bac_vcfs, input.hg19, region, output.pickle)
 
-rule accuracy_count_unpaired:
-    params: job_name = 'accuracy_count_unpaired.{r}'
-    input:  ccf = 'base_calls/unpaired/{r}.out',
-            truth_dict = 'truth_dicts/{r}.truth_dict.p',
+rule accuracy_count_unphased:
+    params: job_name = 'accuracy_count_unphased.{r}'
+    input:  ccf = 'base_calls/unphased/{r}.out',
+            ref_dict = 'ref_dicts/{r}.ref_dict.p',
             gms = 'gms/{r}.gms'
-    output: counts_lst = expand('accuracy_reports/unpaired/split/{{r}}/{cut}/counts.p',cut=cutoffs),
-            mof_lst = expand('accuracy_reports/unpaired/split/{{r}}/{cut}/mismatches',cut=cutoffs),
+    output: counts_lst = expand('accuracy_reports/unphased/split/{{r}}/{cut}/counts.p',cut=variant_calling_cutoffs),
+            mof_lst = expand('accuracy_reports/unphased/split/{{r}}/{cut}/mismatches',cut=variant_calling_cutoffs),
     run:
-        for counts, mof, cut in zip(output.counts_lst, output.mof_lst, cutoffs):
-            caca.accuracy_count(input.ccf, input.truth_dict, input.gms, (1.0-10**(-0.1*float(cut))), counts, mof)
+        for counts, mof, cut in zip(output.counts_lst, output.mof_lst, variant_calling_cutoffs):
+            caca.accuracy_count_unphased(input.ccf, input.ref_dict, input.gms, (1.0-10**(-0.1*float(cut))), counts, mof)
 
-rule accuracy_count_strand_pair:
-    params: job_name = 'accuracy_count_{mode,(same_cell|all_cell|cross_cell|ind_same_cell|same_to_others)}.{r}'
-    input:  ccf = 'base_calls/paired/{r}.out',
-            truth_dict = 'truth_dicts/{r}.truth_dict.p',
+rule accuracy_count_phased:
+    params: job_name = 'accuracy_count_{mode,(same_cell|all_cell|cross_cell|ind_same_cell)}.{r}'
+    input:  ccf = 'base_calls/phased/{r}.ccf',
+            ref_dict = 'ref_dicts/{r}.ref_dict.p',
             gms = 'gms/{r}.gms'
-    output: counts = 'accuracy_reports/{mode,(same_cell|all_cell|cross_cell|ind_same_cell|same_to_others)}/split/{r}/10/counts.p',
-            mof = 'accuracy_reports/{mode,(same_cell|all_cell|cross_cell|ind_same_cell|same_to_others)}/split/{r}/10/mismatches',
-            smf = 'accuracy_reports/strand_mismatch_{mode,(same_cell|all_cell|cross_cell|ind_same_cell|same_to_others)}/split/{r}/10/counts.p'
+    output: counts = 'accuracy_reports/{mode,(same_cell|all_cell|cross_cell|ind_same_cell)}/split/{r}/10/counts.p',
+            mof = 'accuracy_reports/{mode,(same_cell|all_cell|cross_cell|ind_same_cell)}/split/{r}/10/mismatches',
+            smf = 'accuracy_reports/strand_mismatch_{mode,(same_cell|all_cell|cross_cell|ind_same_cell)}/split/{r}/10/counts.p'
     run:
-
         CUT = 0.9
-        if wildcards.mode == 'same_to_others':
-            caca.accuracy_count_strand_pairing(input.ccf, input.truth_dict, input.gms, CUT, output.counts, output.mof, output.smf,separate_haplotypes=False,mode=wildcards.mode)
-            shell('touch {output.smf}')
-        else:
-            caca.accuracy_count_strand_pairing(input.ccf, input.truth_dict, input.gms, CUT, output.counts, output.mof, output.smf,separate_haplotypes=True,mode=wildcards.mode)
+        caca.accuracy_count_phased(input.ccf, input.ref_dict, input.gms, CUT, output.counts, output.mof, output.smf,separate_haplotypes=True,mode=wildcards.mode)
 
-rule accuracy_count_bcftools:
-    params: job_name = 'accuracy_count_bcftools_merged.{cell}.{r}'
-    input:  vcf = 'bcftools_merged_chambers/{cell}/{r}.vcf',
-            truth_dict = 'truth_dicts/{r}.truth_dict.p',
-    output: counts = 'accuracy_reports/bcftools_merged_{cell}/split/{r}/20/counts.p',
-            mof = 'accuracy_reports/bcftools_merged_{cell}/split/{r}/20/mismatches',
+# add phasing information to unphased chamber call files
+rule annotate_assigned_fragments:
+    params: job_name = 'annotate_assigned_fragments.{r}'
+    input:  ccf = 'base_calls/unphased/{r}.out',
+            asn = 'fragment_haplotype_assignments/all',
+    output: ccf = 'base_calls/phased/{r}.ccf',
     run:
-        caca.accuracy_count_bcftools_merged(input.vcf, input.truth_dict, output.counts, output.mof)
+        fragment_haplotype_assignment.annotate_assigned_fragments(input.ccf,input.asn,output.ccf)
 
-'''
-rule annotate_strand_pairs:
-    params: job_name = 'annotate_strand_pairs.{r}'
-    input:  ccf = 'base_calls/unpaired/{r}.out',
-            pairs = 'strand_pairs/all',
-    output: ccf = 'base_calls/paired/{r}.out',
-    run:
-        strand_pairing_analysis.annotate_paired_strands(input.ccf,input.pairs,output.ccf)
-
-rule combine_paired_strand_files:
-    params: job_name = 'combine_paired_strand_files'
-    input:  sep = expand('strand_pairs/{chrom}',chrom=chroms),
-    output: combined = 'strand_pairs/all',
+# combine separate files for assembled fragment haplotypes
+rule combine_assigned_fragment_files:
+    params: job_name = 'combine_assigned_fragment_files'
+    input:  sep = expand('fragment_haplotype_assignments/{chrom}',chrom=chroms),
+    output: combined = 'fragment_haplotype_assignments/all',
     shell:  'cat {input.sep} > {output.combined}'
 
-rule pair_strands:
-    params: job_name = 'pair_strands'
+# assign fragments to assembled haplotypes
+rule assign_fragment_haplotypes:
+    params: job_name = 'assign_fragment_haplotypes.{chrom}'
     input: frag = 'haplotyping/data/PGP1_ALL/fragmat/cov1_strict/{chrom}',
-           vcf  = 'haplotyping/data/PGP1_VCFs_BACindex/{chrom}.vcf',
+           vcf  = 'haplotyping/data/haplotyping_VCFs/{chrom}.vcf',
            hap  = 'haplotyping/experiments/hapcut2_PGP1_ALL/cov1_strict/{chrom}.output'
-    output: sep = 'strand_pairs/{chrom}',
+    output: sep = 'fragment_haplotype_assignments/{chrom}',
     run:
-        strand_pairing_analysis.pair_strands(input.frag,input.vcf,output.sep,input.hap)
+        fragment_haplotype_assignment.assign_fragment_haplotypes(input.frag,input.vcf,output.sep,input.hap)
 
-'''
 # PLOT RESULTS
 rule plot_hapcut2_results:
     params:
@@ -315,39 +236,39 @@ rule plot_hapcut2_results:
         labels = pickle.load(open(input.labels_file,"rb"))
         plot_sissor(data,labels,output.plot2)
 
-exp =['cov1_none','cov1_basic','cov1_strict']#,'cov2_basic']
-exp_labels=['No processing','Basic Processing','Strict Processing']#'Basic Processing, coverage >= 2']
+exp =['cov1_none','cov1_strict']
+exp_labels=['Unprocessed Fragments','Processed Fragments']
 rule calculate_error_rates:
     params:
         job_name = "hapcut2_error_rates"
     input:
         hapblocks = expand("{E}/hapcut2_PGP1_ALL/{exp}/{c}.output",E=HAPLOTYPE_EXP_DIR,exp=exp,c=chroms),
         fragmats  = expand("haplotyping/data/PGP1_ALL/fragmat/{exp}/{c}",exp=exp,c=chroms),
-        var_vcfs  = expand("{v}/{c}.vcf",v=BAC_vcf_dir, c=chroms),
-        bac_haps  = expand("haplotyping/data/BAC/{c}.filtered",c=chroms)
+        var_vcfs  = expand("{v}/{c}.vcf",v=haplotyping_VCF_dir, c=chroms),
+        bac_haps  = expand("haplotyping/data/BAC/{c}.filtered",c=chroms),
+        contig_size_file = 'hg19.chrom.sizes'
     output:
         stats_file  = "{}/hapcut2.stats.p".format(HAPLOTYPE_ERROR_RATES_DIR),
         labels_file = "{}/hapcut2.labels.p".format(HAPLOTYPE_ERROR_RATES_DIR)
     run:
         # list of lists of error results,
-        data   = [] # index of the list is a 'condition' each inner list has 23 error results (each chrom).
+        data   = []
         labels = exp_labels
 
         for x in exp: # sample
-            datalist = []
-            for c in chroms: # chromosome
-                assembly_file = "{}/hapcut2_PGP1_ALL/{}/{}.output".format(HAPLOTYPE_EXP_DIR,x,c)
-                runtime_file  = None
-                frag_file     = "haplotyping/data/PGP1_ALL/fragmat/{}/{}".format(x,c)
-                vcf_file      = "{}/{}.vcf".format(BAC_vcf_dir,c)
-                truth_file    = "haplotyping/data/BAC/{}.filtered".format(c)
-                err = error_rates.hapblock_hapblock_error_rate(truth_file, assembly_file, frag_file, vcf_file, runtime_file, use_SNP_index=False)
-                datalist.append(err)
+
+            assembly_files = ["{}/hapcut2_PGP1_ALL/{}/{}.output".format(HAPLOTYPE_EXP_DIR,x,c) for c in chroms]
+            frag_files     = ["haplotyping/data/PGP1_ALL/fragmat/{}/{}".format(x,c) for c in chroms]
+            vcf_files      = ["{}/{}.vcf".format(haplotyping_VCF_dir,c) for c in chroms]
+            truth_files    = ["haplotyping/data/BAC/{}.filtered".format(c) for c in chroms]
+            truth_vcf_files      = ["{}/{}.vcf".format(BAC_VCF_dir,c) for c in chroms]
+
+            err = chs.hapblock_hapblock_error_rate_multiple(truth_files, truth_vcf_files, assembly_files, frag_files, vcf_files, input.contig_size_file)
 
             print("{} results over all chromosomes:".format(x))
-            print(sum(datalist,error_rates.error_result()))
+            print(err)
 
-            data.append(datalist)
+            data.append(err)
 
         pickle.dump(data,open(output.stats_file,"wb"))
         pickle.dump(labels,open(output.labels_file,"wb"))
@@ -363,7 +284,7 @@ rule prune_haplotype:
         hapblocks = expand("{E}/hapcut2_{{s}}/{{x}}/{c}.output",E=HAPLOTYPE_EXP_DIR,c=chroms)
     run:
         for i, o in zip(input.hapblocks,output.hapblocks):
-            fileIO.prune_hapblock_file(i, o, snp_conf_cutoff=0.95, split_conf_cutoff=-1, use_refhap_heuristic=True) #split_conf_cutoff=0.9999
+            fileIO.prune_hapblock_file(i, o, snp_conf_cutoff=0.95, split_conf_cutoff=0.95, use_refhap_heuristic=True) #split_conf_cutoff=0.9999
 
 # RUN HAPCUT2
 rule run_hapcut2:
@@ -371,7 +292,7 @@ rule run_hapcut2:
         job_name = "{s}.{c}.{x}.hapcut",
     input:
         frag_file = "haplotyping/data/{s}/fragmat/{x}/{c}",
-        vcf_file  = lambda wildcards: expand("{v}/{c}.vcf", v=BAC_vcf_dir,c=wildcards.c)
+        vcf_file  = lambda wildcards: expand("{v}/{c}.vcf", v=haplotyping_VCF_dir,c=wildcards.c)
     output:
         hapblocks = "{E}/hapcut2_{s}/{x}/{c}.output.uncorrected",
     shell:
@@ -384,17 +305,11 @@ rule fix_fragmat:
     params:
         job_name  = "fix_fragmat.{x}",
     input:
-        var_vcfs = expand("{v}/{CHR}.vcf",v=BAC_vcf_dir,CHR=chroms),
+        var_vcfs = expand("{v}/{CHR}.vcf",v=haplotyping_VCF_dir,CHR=chroms),
         P_ALL = expand("haplotyping/data/PGP1_ALL/augmented_fragmat/{c}",c=chroms)
     output:
         fixed = expand("haplotyping/data/PGP1_ALL/fragmat/{{x}}/{c}",c=chroms)
     run:
-        mincov = 0
-        if 'cov2' in wildcards.x:
-            mincov = 2
-        elif 'cov3' in wildcards.x:
-            mincov = 3
-
         if 'none' in wildcards.x:
             mode = 'none'
         elif 'basic' in wildcards.x:
@@ -403,12 +318,12 @@ rule fix_fragmat:
             mode = 'strict'
 
         for i,v,o in zip(input.P_ALL, input.var_vcfs, output.fixed):
-            fix_chamber_contamination(i,v,o,threshold=2, min_coverage=mincov,mode=mode)
+            fix_chamber_contamination(i,v,o,threshold=2, min_coverage=0,mode=mode)
 
 rule generate_fragmatrix:
     params: job_name = 'generate_fragmatrix'
     input:  ccf      = 'haplotyping/data/PGP1_ALL.het.whole_genome.ccf',
-            vcfs     = expand('{v}/{c}.vcf',v=BAC_vcf_dir,c=chroms),
+            vcfs     = expand('{v}/{c}.vcf',v=haplotyping_VCF_dir,c=chroms),
             bounds   = expand('eric_fragment_boundary_beds/{P[0]}/ch{P[1]}.bed',P=product(cells,chambers)),
     output: fragmat  = expand('haplotyping/data/PGP1_ALL/augmented_fragmat/{c}',c=chroms),
 
@@ -429,10 +344,10 @@ rule combine_filtered:
 
 rule filter_CCF:
     params: job_name = 'filter_CCF_{chrom}.{start}.{end}'
-    input:  ccf      = 'base_calls/unpaired/{chrom}.{start}.{end}.out',
-            vcf      = 'haplotyping/data/PGP1_VCFs_BACindex/all.vcf'
-    output: ccf      = temp('haplotyping/data/ccf_split/{chrom}.{start}.{end}.ccf'),
-            vcf      = temp('haplotyping/data/vcf_split/{chrom}.{start}.{end}.vcf'),
+    input:  ccf      = 'base_calls/unphased/{chrom}.{start}.{end}.out',
+            vcf      = 'haplotyping/data/haplotyping_VCFs/all.vcf'
+    output: ccf      = 'haplotyping/data/ccf_split/{chrom}.{start}.{end}.ccf',
+            vcf      = 'haplotyping/data/vcf_split/{chrom}.{start}.{end}.vcf',
     run:
         het_pos = dict()
         reg_chrom = str(wildcards.chrom)
@@ -459,7 +374,12 @@ rule filter_CCF:
                     print(line.strip(),file=ccf_out)
                     print(het_pos[(chrom,pos)],file=vcf_out)
 
-# assemble BAC haplotypes
+#rule combine_intersect:
+#    params: job_name = "combine_intersect",
+#    input: expand("haplotyping/data/haplotyping_VCFs/{c}.vcf",c=chroms)
+#    output: 'haplotyping/data/haplotyping_VCFs/all.vcf'
+#    shell:
+#        '''cat {input} > {output}'''
 
 rule prune_BAC:
     params:
@@ -479,7 +399,7 @@ rule run_hapcut2_BAC:
         job_name = "{c}.BAC.hapcut2",
     input:
         frag_file = "haplotyping/data/BAC_frags_fixed/{c}",
-        vcf_file  = "%s/{c}.vcf" % BAC_vcf_dir_old
+        vcf_file  = "%s/{c}.vcf" % BAC_VCF_dir
     output:
         hapblocks = "haplotyping/data/BAC/{c}"
     shell:
@@ -492,27 +412,64 @@ rule fix_fragmat_BAC:
     params:
         job_name  = "fix_fragmat_BAC_{c}",
     input:
-        var_vcfs = "%s/{c}.vcf" % BAC_vcf_dir_old,
-        frags = "haplotyping/data/BAC_frags/{c}"
+        var_vcfs = "%s/{c}.vcf" % BAC_VCF_dir,
+        frags = "haplotyping/data/BAC_frags/{c}",
+        #WGS_variants = "%s/{c}.vcf" % haplotyping_VCF_dir,
     output:
         fixed = "haplotyping/data/BAC_frags_fixed/{c}"
     run:
-        fix_chamber_contamination(input.frags,input.var_vcfs,output.fixed,threshold=2, min_coverage=0,mode='basic')
+        fix_chamber_contamination(input.frags,input.var_vcfs,output.fixed,threshold=2, min_coverage=0,mode='basic',vcf_filter=None) #input.WGS_variants)
 
-rule filter_CGI_VCF:
-    params: job_name  = "filter_CGI_VCF",
-    input: vcfs = expand("{d}/{c}.vcf",d=BAC_vcf_dir_old,c=chrom)
-           filter_set = "/oasis/tscc/scratch/wkchu/SISSOR/NewPGP1REF/PGP-Harvard-var-hu43860C-20160106T060652Z.vcf"
-    output: vcfs = expand("{d}/{c}.vcf",d=BAC_vcf_dir,c=chrom)
+#rule filter_CGI_VCF:
+#    params: job_name  = "filter_CGI_VCF",
+#    input: vcfs = expand("{d}/{c}.vcf",d=BAC_VCF_dir,c=chroms),
+#           filter_set = "/oasis/tscc/scratch/wkchu/SISSOR/NewPGP1REF/PGP-Harvard-var-hu43860C-20160106T060652Z.vcf"
+#    output: vcfs = expand("{d}/{c}.vcf",d=haplotyping_VCF_dir,c=chroms)
+#    run:
+#        filter_vcf.filter_vcf(input.vcfs,output.vcfs,input.filter_set)
+
+rule combine_haplotyping_VCFs:
+    params: job_name = "combine_haplotyping_VCFs",
+    input: expand("haplotyping/data/haplotyping_VCFs/{c}.vcf",c=chroms)
+    output: 'haplotyping/data/haplotyping_VCFs/all.vcf'
+    shell:
+        '''cat {input} > {output}'''
+
+rule filter_haplotyping_VCFs:
+    params: job_name  = "filter_haplotyping_VCF",
+    input: vcf = "wgs/wgs_hg19.vcf"
+    output: vcfs = expand("{d}/{c}.vcf",d=haplotyping_VCF_dir,c=chroms)
     run:
-        filter_vcf.filter_vcf(input.vcfs,output.vcfs,input.filter_set)
+        filter_vcf.filter_wgs_vcf(input.vcf,output.vcfs,chroms) # input.filter_set
+
+rule sort_wgs_SNPs:
+    params: job_name  = 'liftover_SNPs',
+    input:  vcf = 'wgs/wgs_hg19.autosomes.unsorted.vcf',
+    output: vcf = 'wgs/wgs_hg19.vcf'
+    shell:
+        '''cat {input} | vcf-sort -c -p 4 > {output}'''
+
+rule filter_wgs_autosomes:
+    params: job_name  = 'filter_wgs_autosomes',
+    input:  vcf = 'wgs/wgs_hg19.unsorted.vcf',
+    output: vcf = 'wgs/wgs_hg19.autosomes.unsorted.vcf'
+    run:
+        with open(input.vcf,'r') as inf, open(output.vcf,'w') as outf:
+            for line in inf:
+                if line[:1] == '#':
+                    continue
+                el = line.strip().split('\t')
+                if len(el) < 5:
+                    continue
+                if el[0] in chroms_set:
+                    print(line.strip(),file=outf)
 
 rule liftover_wgs_SNPs:
     params: job_name  = 'liftover_SNPs',
     input:  vcf = 'wgs/wgs_grch38.vcf',
             chain = 'hg38ToHg19.over.chain',
             hg19 = HG19
-    output: vcf = 'wgs/wgs_hg19.vcf',
+    output: vcf = 'wgs/wgs_hg19.unsorted.vcf',
     shell:
         '''
         {CROSSMAP} \
@@ -560,7 +517,7 @@ rule call_alleles:
             het_config_probs = 'parameters/het_config_probs.p',
             haploid_genotype_priors = 'parameters/haploid_genotype_priors.p',
             diploid_genotype_priors = 'parameters/diploid_genotype_priors.p'
-    output: ccf = 'base_calls/unpaired/{r}.out'
+    output: ccf = 'base_calls/unphased/{r}.out'
     shell:  '{PYPY} sissorhands.py -i {input.pileup} -o {output.ccf}'
     #run:
         #import sissorhands
@@ -587,7 +544,7 @@ rule estimate_parameters:
             #'parameters/total_sampled_cell_positions.p',
             #'parameters/omega.p'
     run:
-        estimate_parameters.estimate_parameters(regions,grams_DNA_before_MDA,grams_DNA_after_MDA)
+        estimate_parameters.estimate_parameters(regions)
 
 rule obtain_counts_parallel:
     params: job_name = 'obtain_counts_parallel.{r}'

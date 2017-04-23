@@ -5,6 +5,7 @@ Created on Thu May 19 21:44:48 2016
 @author: peter
 """
 
+import fileIO
 import fragment
 import argparse
 import sys
@@ -385,7 +386,7 @@ def filter_discordant_fragments_SER(flist, SER_threshold):
             #SER_err[j,i] = e
 #            total += t
 #            err   += e
-            errs.append(e/t)
+            #errs.append(e/t)
 
         if t_total <= 10 or e_total / t_total < SER_threshold: #len(errs) <= 1 or min(errs) < SER_threshold:
             new_flist.append(f1)
@@ -457,10 +458,56 @@ def filter_het_positions(flist):
 
     return filtered_flist
 
-def fix_chamber_contamination(fragmentfile, vcf_file, outfile, threshold=2, min_coverage=0, mode='none'):
+# NOT FOR WHOLE-GENOME VCFs
+# !!!!!!!!!!!!!!!!!!!!!!!!
+# NOT FOR WHOLE-GENOME VCFs
+def filter_on_VCF(flist, vcf_filter):
+
+    vcf_set = set()
+    with open(vcf_filter,'r') as infile:
+        for line in infile:
+            if line[:1] == '#':
+                continue
+            el = line.strip().split('\t')
+            if len(el) < 5:
+                continue
+
+            genomic_pos = int(el[1])-1
+            vcf_set.add(genomic_pos)
+
+    filtered_flist = []
+
+    # for each fragment and name
+    for f in flist:
+
+        new_seq = []
+
+        for a in f.seq:
+
+            # if coverage greater than 1
+            if a[1] in vcf_set:
+
+                new_seq.append(a)
+
+        # if the fragment has at least 2 alleles after filtering add it to new list
+        if len(new_seq) >= 2:
+
+            filtered_flist.append(fragment.fragment(new_seq,f.name))
+
+    return filtered_flist
+
+def fix_chamber_contamination(fragmentfile, vcf_file, outfile, threshold=2, min_coverage=0, mode='none', vcf_filter=None):
 
     # READ FRAGMENT MATRIX
     flist = fragment.read_fragment_matrix(fragmentfile,vcf_file)
+
+    # VCF FILE AND VCF_FILTER MUST CONTAIN ONLY ONE CHROMOSOME EACH OR THIS WILL DO BAD THINGS
+    if vcf_filter != None:
+        chrom1 = fileIO.get_ref_name(vcf_file)
+        chrom2 = fileIO.get_ref_name(vcf_filter)
+        assert (chrom1 == chrom2)
+
+        flist = filter_on_VCF(flist, vcf_filter)
 
     if mode == 'none':
 
