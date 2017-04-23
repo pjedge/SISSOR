@@ -3,8 +3,7 @@ mpl.use('Agg',force=True)
 import numpy as np
 import matplotlib.pyplot as plt
 import sys
-sys.path.append('/home/peter/git/HapTools')
-import error_rates
+import calculate_haplotype_statistics as chs
 
 mpl.rc('legend', fontsize=13)
 mpl.rc('xtick', labelsize=13)
@@ -18,34 +17,25 @@ def plot_sissor(data,labels, outname):
     plt.figure(figsize=(10,5))
     ax = plt.subplot(121)
     N = 2
-    errs0 = sum(data[0],error_rates.error_result())
-    errs1 = sum(data[1],error_rates.error_result())
-    errs2 = sum(data[2],error_rates.error_result())
+    errs0 = data[0]
+    errs1 = data[1]
 
     ind = np.arange(N)  # the x locations for the groups
     width = 0.15       # the width of the bars
 
-    plt.bar(ind, (errs0.get_switch_rate(),errs0.get_mismatch_rate()), color='k',
+    plt.bar(ind, (errs0.get_switch_rate(),errs0.get_mismatch_rate()), color='r',
             ecolor='black', # black error bar color
             alpha=0.5,      # transparency
             width=0.15,      # smaller bar width
             align='center',
             label=labels[0])
 
-    plt.bar(ind+width, (errs1.get_switch_rate(),errs1.get_mismatch_rate()), color='r',
+    plt.bar(ind+width, (errs1.get_switch_rate(),errs1.get_mismatch_rate()), color='b',
             ecolor='black', # black error bar color
             alpha=0.5,      # transparency
             width=0.15,      # smaller bar width
             align='center',
             label=labels[1])
-
-    plt.bar(ind+2*width, (errs2.get_switch_rate(),errs2.get_mismatch_rate()), color='b',
-            ecolor='black', # black error bar color
-            alpha=0.5,      # transparency
-            width=0.15,      # smaller bar width
-            align='center',
-            label=labels[2])
-
 
     # add some text for labels, title and axes ticks
     #ax.set_ylim(0,0.025)
@@ -66,26 +56,19 @@ def plot_sissor(data,labels, outname):
     ind = np.arange(N)  # the x locations for the groups
     width = 0.15       # the width of the bars
 
-    plt.bar(ind, (errs0.get_N50()/1000000,errs0.get_AN50()/1000000), color='k',
+    plt.bar(ind, (errs0.get_N50()/1000000,errs0.get_AN50()/1000000), color='r',
             ecolor='black', # black error bar color
             alpha=0.5,      # transparency
             width=0.15,      # smaller bar width
             align='center',
             label=labels[0])
 
-    plt.bar(ind+width, (errs1.get_N50()/1000000,errs1.get_AN50()/1000000), color='r',
+    plt.bar(ind+width, (errs1.get_N50()/1000000,errs1.get_AN50()/1000000), color='b',
             ecolor='black', # black error bar color
             alpha=0.5,      # transparency
             width=0.15,      # smaller bar width
             align='center',
             label=labels[1])
-
-    plt.bar(ind+2*width, (errs2.get_N50()/1000000,errs2.get_AN50()/1000000), color='b',
-            ecolor='black', # black error bar color
-            alpha=0.5,      # transparency
-            width=0.15,      # smaller bar width
-            align='center',
-            label=labels[2])
 
     # add some text for labels, title and axes ticks
     ax.set_ylabel('Megabases')
