@@ -16,9 +16,6 @@ class fragment:
     def __init__(self, seq, name, switch_errors=None, mismatch_errors = None):
         self.seq = seq                         # list of (snp index, genomic index, allele call, quality score) tuples
         self.name = name                       # fragment ID / name
-        self.switch_errors = switch_errors     # list of SNP index positions where switch errors were found
-        self.mismatch_errors = mismatch_errors # list of SNP index positions where mismatch errors occured
-        self.haplotype = None
 
     def __str__(self):
         fragstr = ''
