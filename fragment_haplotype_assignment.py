@@ -9,6 +9,7 @@ import fragment
 import fileIO
 from collections import defaultdict
 from itertools import combinations
+from chamber_allele_call_accuracy import parse_bedfile
 
 ID_LEN_NO_MODS = 5
 
@@ -97,6 +98,18 @@ def assign_fragment_haplotypes(fragmentfile, vcf_file, outputfile, haplotype_fil
 
         for (chrom, start, end, cell, chamber, parent) in assigned_fragments:
             print('{}\t{}\t{}\t{}\t{}\t{}'.format(chrom, start+1, end+1, cell, chamber, parent), file=opf)
+
+def assign_fragment_haplotypes_XY(bounds, cell_ch_nos, outfile):
+    chrXY_bounds = []
+    for bounds_file, (cell, ch) in zip(bounds,cell_ch_nos):
+        bounds = parse_bedfile(bounds_file)
+        for chrom,start,end in bounds:
+            if chrom in ['chrX','chrY','X','Y']:
+                chrXY_bounds.append((chrom,int(start),int(end),cell,ch))
+
+    with open(outfile,'w') as outf:
+        for chrom,start,end,cell,ch in sorted(chrXY_bounds):
+            print("{}\t{}\t{}\t{}\t{}\tP1".format(chrom,start,end-1,cell,ch),file=outf)
 
 def annotate_assigned_fragments(chamber_call_file, fragment_assignment_file, output_file):
 
