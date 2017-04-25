@@ -1,5 +1,6 @@
 from collections import defaultdict
 import os
+from math import log10
 #import sys
 from math import log10
 

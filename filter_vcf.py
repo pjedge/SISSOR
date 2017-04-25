@@ -5,8 +5,10 @@ bases = {'A','T','G','C'}
 def filter_vcf(in_vcfs,out_vcfs, filter_set):
 
     vcf_dict = dict()
-    with open(filter_set,'r') as inf:
-        for line in inf:
+
+    with open(filter_set,'r') as infile:
+        for line in infile:
+
             if line[:1] == '#':
                 continue
             el = line.strip().split('\t')
