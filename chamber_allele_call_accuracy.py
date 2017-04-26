@@ -122,13 +122,14 @@ def parse_bedfile(input_file):
 
     return boundaries
 
-def generate_ref_dict(GFF_file, WGS_VCF_file, CGI_VCF_file, BAC_VCF_files, HG19, region, ref_dict_pickle):
+def generate_ref_dict(GFF_file, WGS_VCF_file, BAC_VCF_files, HG19, region, ref_dict_pickle):
 
     dp_pat = re.compile("DP=(\d+)")
     qr_pat = re.compile(";QR=(\d+)")
     type_pat = re.compile("TYPE=([^;]+);")
     region_chrom, region_start, region_end = region
-    ref_dict = {'CGI':dict(),'WGS':dict(),'BAC':dict()}
+    cgi_dict = dict()
+    ref_dict = {'CGI/WGS':dict(),'BAC':dict()}
 
     hg19_fasta = pysam.FastaFile(HG19)
 
@@ -168,7 +169,7 @@ def generate_ref_dict(GFF_file, WGS_VCF_file, CGI_VCF_file, BAC_VCF_files, HG19,
                     assert(False)
 
 
-                ref_dict['CGI'][(gff_chrom,gff_pos)] = alleles
+                cgi_dict[(gff_chrom,gff_pos)] = alleles
 
             elif gff_line[2] == 'REF':
 
@@ -186,94 +187,10 @@ def generate_ref_dict(GFF_file, WGS_VCF_file, CGI_VCF_file, BAC_VCF_files, HG19,
                     if ref_lookup not in bases:  # e.g. 'N' alleles
                         continue
 
-                    ref_dict['CGI'][(gff_chrom,gff_pos)] = {ref_lookup}
-    '''
-    # add calls observed in Harvard CGI dataset to the dictionary
-    with open(CGI_VCF_file,'r') as vcf:
-        for line in vcf:
-            if line[0] == '#' or len(line) < 3:
-                continue
+                    cgi_dict[(gff_chrom,gff_pos)] = {ref_lookup}
 
-            vcf_line = line.strip().split('\t')
 
-            vcf_chrom = vcf_line[0]
-            vcf_pos   = int(vcf_line[1])
-            vcf_start = vcf_pos
-            vcf_filter = vcf_line[6]
-
-            if vcf_filter != 'PASS':
-                continue
-
-            genotype = vcf_line[9]
-
-            if genotype not in ['0/0','0/1','1/0','1/1','0|0','0|1','1|0','1|1']:
-                continue
-
-            if vcf_line[7] == '.':
-                vcf_end = vcf_start
-            else:
-                assert(vcf_line[7][:4] == 'END=')
-                assert(genotype in ['0/0','0|0'])
-                vcf_end = int(vcf_line[7][4:])
-
-            if not ((vcf_chrom == region_chrom and vcf_start >= region_start and vcf_start <= region_end) or
-                    (vcf_chrom == region_chrom and vcf_end >= region_start and vcf_end <= region_end)):
-                continue
-
-            if genotype in ['0/0','0|0']:
-
-                for vcf_pos in range(vcf_start,vcf_end + 1):
-
-                    ref_lookup = str.upper(hg19_fasta.fetch(vcf_chrom, vcf_pos-1, vcf_pos))  # pysam uses 0-index
-
-                    if ref_lookup == 'N':
-                        continue
-
-                    assert(ref_lookup in bases)
-
-                    alleles = {ref_lookup}
-
-                    # if both CGI datasets have the same call then add them to intersected set of calls
-                    #if (vcf_chrom,vcf_pos) in cgi_dict_file1 and alleles == cgi_dict_file1[(vcf_chrom,vcf_pos)]:
-                    ref_dict['CGI'][(vcf_chrom,vcf_pos)] = alleles
-
-                    #if (vcf_chrom,vcf_pos) not in cgi_dict_file1:
-                    #    print("{}:{} seen in Harvard CGI dataset but not in the first.".format(vcf_chrom,vcf_pos))
-                    #elif alleles != cgi_dict_file1[(vcf_chrom,vcf_pos)]:
-                    #    print("{}:{} seen in first and second CGI dataset but calls differ.".format(vcf_chrom,vcf_pos))
-
-            else:
-                alleles = set()
-
-                ref_allele = str.upper(vcf_line[3])
-                variant_allele = str.upper(vcf_line[4])
-                if len(ref_allele) > 1 or len(variant_allele) > 1:
-                    continue
-
-                if ref_allele == 'N' or variant_allele == 'N':
-                    continue
-
-                assert(ref_allele in bases)
-                assert(variant_allele in bases)
-
-                if '0' in genotype:
-                    alleles.add(ref_allele)
-                if '1' in genotype:
-                    alleles.add(variant_allele)
-
-                # if both CGI datasets have the same call then add them to intersected set of calls
-                #if (vcf_chrom,vcf_pos) in cgi_dict_file1 and alleles == cgi_dict_file1[(vcf_chrom,vcf_pos)]:
-                ref_dict['CGI'][(vcf_chrom,vcf_pos)] = alleles
-
-                #if (vcf_chrom,vcf_pos) not in cgi_dict_file1:
-                #    print("{}:{} seen in Harvard CGI dataset but not in the original.".format(vcf_chrom,vcf_pos))
-                #elif alleles != cgi_dict_file1[(vcf_chrom,vcf_pos)]:
-                #    print("{}:{} seen in original and Harvard CGI dataset but calls differ.".format(vcf_chrom,vcf_pos))
-
-    #del cgi_dict_file1
-    '''
-
-    # add SNVs seen in WGS dataset to dictionary
+    # INTERSECT calls seen in CGI PGP1 dataset to calls seen in high-coverage Illumina WGS for PGP1f.
     with open(WGS_VCF_file,'r') as vcf:
         for line in vcf:
             if line[0] == '#' or len(line) < 3:
@@ -325,10 +242,10 @@ def generate_ref_dict(GFF_file, WGS_VCF_file, CGI_VCF_file, BAC_VCF_files, HG19,
             if len(alleles.intersection(bases)) != len(alleles):
                 continue
 
-            ref_dict['WGS'][(vcf_chrom,vcf_pos)] = alleles
+            if (vcf_chrom,vcf_pos) in cgi_dict and alleles == cgi_dict[(vcf_chrom,vcf_pos)]:
+                ref_dict['CGI/WGS'][(vcf_chrom,vcf_pos)] = alleles
 
     # add SNVs seen in BAC VCF files to dictionary
-
     for BAC_VCF in BAC_VCF_files:
         with open(BAC_VCF,'r') as inf:
             for line in inf:
@@ -466,12 +383,10 @@ def accuracy_count_unphased(chamber_call_file, ref_dict_pickle, GMS_file, cutoff
             matches_ref  = None
             ref_genotype = None
 
-            if (ccf_chrom,ccf_pos) in ref_dict['CGI']:
+            if (ccf_chrom,ccf_pos) in ref_dict['CGI/WGS']:
 
                 ref_set = set()
-                ref_set = ref_set.union(ref_dict['CGI'][(ccf_chrom,ccf_pos)])
-                if (ccf_chrom,ccf_pos) in ref_dict['WGS']:
-                    ref_set = ref_set.union(ref_dict['WGS'][(ccf_chrom,ccf_pos)])
+                ref_set = ref_set.union(ref_dict['CGI/WGS'][(ccf_chrom,ccf_pos)])
                 if (ccf_chrom,ccf_pos) in ref_dict['BAC']:
                     ref_set = ref_set.union(ref_dict['BAC'][(ccf_chrom,ccf_pos)])
 
@@ -718,20 +633,12 @@ def accuracy_count_phased(chamber_call_file, ref_dict_pickle, GMS_file, cutoff, 
                         third_chamber_match = True
 
                 # determine if matches CGI
-                if (ccf_chrom,ccf_pos) not in ref_dict['CGI']:
+                if (ccf_chrom,ccf_pos) not in ref_dict['CGI/WGS']:
                     CGI_match = None
-                elif matched_allele <= ref_dict['CGI'][(ccf_chrom,ccf_pos)]:
+                elif matched_allele <= ref_dict['CGI/WGS'][(ccf_chrom,ccf_pos)]:
                     CGI_match = 1
                 else:
                     CGI_match = 0
-
-                # determine if matches WGS
-                if (ccf_chrom,ccf_pos) not in ref_dict['WGS']:
-                    WGS_match = None
-                elif matched_allele <= ref_dict['WGS'][(ccf_chrom,ccf_pos)]:
-                    WGS_match = 1
-                else:
-                    WGS_match = 0
 
                 # determine if matches BAC
                 if (ccf_chrom,ccf_pos) not in ref_dict['BAC']:
@@ -741,13 +648,12 @@ def accuracy_count_phased(chamber_call_file, ref_dict_pickle, GMS_file, cutoff, 
                 else:
                     BAC_match = 0
 
-                cgi_allele = ref_dict['CGI'][(ccf_chrom,ccf_pos)] if (ccf_chrom,ccf_pos) in ref_dict['CGI'] else {'None'}
+                cgi_allele = ref_dict['CGI/WGS'][(ccf_chrom,ccf_pos)] if (ccf_chrom,ccf_pos) in ref_dict['CGI/WGS'] else {'None'}
 
                 if CGI_match == False:
-                    wgs_string = ';WGS_match' if WGS_match else ''
                     bac_string = ';BAC_match' if BAC_match else ''
                     tcm_string = ';THIRD_CHAMBER_MATCH' if third_chamber_match else ''
-                    tag = "MISMATCH:{}:{}{}{}{}".format(''.join(list(cgi_allele)),matched_chambers,wgs_string,bac_string,tcm_string)
+                    tag = "MISMATCH:{}:{}{}{}".format(''.join(list(cgi_allele)),matched_chambers,bac_string,tcm_string)
                     el = line.strip().split('\t')
                     if el[-1] == 'N/A':
                         el[-1] = tag

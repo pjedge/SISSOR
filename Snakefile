@@ -31,6 +31,31 @@ chroms_set_XY = set(chroms_XY)
 
 chunksize = int(5e6)
 
+grch38_size_list = [('chr1', 248956422),
+ ('chr2', 242193529),
+ ('chr3', 198295559),
+ ('chr4', 190214555),
+ ('chr5', 181538259),
+ ('chr6', 170805979),
+ ('chr7', 159345973),
+ ('chr8', 145138636),
+ ('chr9', 138394717),
+ ('chr10', 133797422),
+ ('chr11', 135086622),
+ ('chr12', 133275309),
+ ('chr13', 114364328),
+ ('chr14', 107043718),
+ ('chr15', 101991189),
+ ('chr16', 90338345),
+ ('chr17', 83257441),
+ ('chr18', 80373285),
+ ('chr19', 58617616),
+ ('chr20', 64444167),
+ ('chr21', 46709983),
+ ('chr22', 50818468),
+ ('chrX', 156040895),
+ ('chrY', 57227415)]
+
 hg19_size_list = [('chr1', 249250621),
  ('chr2', 243199373),
  ('chr3', 198022430),
@@ -56,6 +81,16 @@ hg19_size_list = [('chr1', 249250621),
  ('chrX', 155270560),
  ('chrY', 59373566)]
 
+
+# create chunks of grch38
+# return list of (chrom,start,stop) tuples. stop is inclusive
+grch38_chunklist = []
+for chrom, chrlen in grch38_size_list:
+    for start in range(1,chrlen+1,chunksize):
+        end = start+chunksize-1 if start+chunksize-1 < chrlen else chrlen
+        grch38_chunklist.append((chrom,start,end))
+
+grch38_regions = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in grch38_chunklist]
 
 # create chunks of hg19
 # return list of (chrom,start,stop) tuples. stop is inclusive
@@ -87,6 +122,9 @@ WGS_VCF_URL = 'https://www.encodeproject.org/files/ENCFF995BBX/@@download/ENCFF9
 HG19     = '/oasis/tscc/scratch/pedge/data/genomes/hg19/hg19.fa' #'/home/wkchu/zhang_lab_oasis/resources_v2.8_b37/human_g1k_v37_decoy.fasta'
 CGI_SNPs1 = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/BAM/ns.gff'
 CGI_SNPs2 = '/oasis/tscc/scratch/wkchu/SISSOR/NewPGP1REF/PGP-Harvard-var-hu43860C-20160106T060652Z.vcf'
+WGS_BAM_URL = 'https://www.encodeproject.org/files/ENCFF713HUF/@@download/ENCFF713HUF.bam'
+GRCH38_URL = 'https://www.encodeproject.org/files/GRCh38_no_alt_analysis_set_GCA_000001405.15/@@download/GRCh38_no_alt_analysis_set_GCA_000001405.15.fasta.gz'
+
 BAC_VCFs = ['/home/wkchu/BACPoolPileup/Indx73.bac.pileup.vcf',
 '/home/wkchu/BACPoolPileup/Indx74.bac.pileup.vcf',
 '/home/wkchu/BACPoolPileup/Indx75.bac.pileup.vcf',
@@ -162,9 +200,8 @@ rule accuracy_aggregate_mismatches:
 rule generate_ref_dict:
     params: job_name = 'generate_ref_dict.{chrom}.{start}.{end}'
     input:  gff = CGI_SNPs1,
-            cgi_vcf  = CGI_SNPs2,
             hg19 = HG19,
-            wgs_vcf = 'wgs/wgs_hg19.vcf',
+            wgs_vcf = 'wgs/freebayes_hg19/{chrom}.{start}.{end}.vcf',
             bac_vcfs = BAC_VCFs
     output: pickle = 'ref_dicts/{chrom}.{start}.{end}.ref_dict.p'
     run:
@@ -172,7 +209,7 @@ rule generate_ref_dict:
         reg_start = int(wildcards.start)
         reg_end   = int(wildcards.end)
         region = (reg_chrom, reg_start, reg_end)
-        caca.generate_ref_dict(input.gff, input.wgs_vcf, input.cgi_vcf, input.bac_vcfs, input.hg19, region, output.pickle)
+        caca.generate_ref_dict(input.gff, input.wgs_vcf, input.bac_vcfs, input.hg19, region, output.pickle)
 
 rule accuracy_count_unphased:
     params: job_name = 'accuracy_count_unphased.{r}'
@@ -197,6 +234,87 @@ rule accuracy_count_phased:
         CUT = 0.9
         caca.accuracy_count_phased(input.ccf, input.ref_dict, input.gms, CUT, output.counts, output.mof, output.smf,separate_haplotypes=True,mode=wildcards.mode)
 
+###################################################################
+# NEED SET OF REFERENCE AND VARIANT CALLS FROM PGP1F DATASET
+# procedure is to call freebayes on short chunks of bam,
+# combine each individual chrom,
+# sort the chromosome separately,
+# then split into short regions again.
+###################################################################
+
+rule split_freebayes_wgs:
+    params: job_name  = 'split_freebayes_wgs_{c}',
+    input:  vcf  = 'wgs/lifted_sorted/{c}.vcf'
+    output: done  = touch('wgs/freebayes_hg19/{c}.done')
+    run:
+        outfiles   = ['wgs/freebayes_hg19/{}.{}.{}.vcf'.format(chrom,start,end) for (chrom,start,end) in chunklist if chrom == wildcards.c]
+        chr_chunks = [(chrom,start,end) for (chrom,start,end) in chunklist if chrom == wildcards.c]
+        caca.split_vcf(input.vcf, chr_chunks, outfiles)
+
+rule sort_freebayes_wgs:
+    params: job_name  = 'sort_freebayes_wgs.{c}',
+    input:  expand('wgs/lifted/{r}.vcf',r=grch38_regions),
+    output: 'wgs/lifted_sorted/{c}.vcf'
+    run:
+        infiles =  [f for (chrom,start,end),f in zip(grch38_chunklist,input) if chrom == wildcards.c]
+        shell('''
+        grep '^#' {infiles[0]} > {output}
+        cat {infiles} |
+        grep -v '^#' |
+        vcf-sort -c -p 4 >> {output}
+        ''')
+
+rule liftover_wgs:
+    params: job_name  = 'liftover.{r}',
+    input:  vcf = 'wgs/freebayes/{r}.vcf',
+            chain = 'hg38ToHg19.over.chain'
+    output: vcf = 'wgs/lifted/{r}.vcf',
+    shell:
+        '''
+        {CROSSMAP} \
+        vcf \
+        {input.chain} \
+        {input.vcf} \
+        {HG19} \
+        {output.vcf}
+        '''
+
+rule run_freebayes_wgs:
+    params: job_name  = 'freebayes.{chr}.{start}.{stop}',
+    input:  bam   = 'wgs/wgs.bam',
+            bai   = 'wgs/wgs.bam.bai',
+            ref   = GRCH38
+    output: region_vcf = 'wgs/freebayes/{chr}.{start}.{stop}.vcf'
+    shell:
+        '''
+        freebayes -f {GRCH38} \
+        --standard-filters \
+        --report-monomorphic \
+        --region {wildcards.chr}:{wildcards.start}..{wildcards.stop} \
+         {input.bam} > {output.region_vcf}
+        '''
+
+rule download_grch38:
+    params: job_name = 'download_grch38'
+    output: fa = GRCH38
+    shell:
+        '''
+        wget {GRCH38_URL} -O {output.fa}.gz
+        gunzip {output.fa}.gz
+        '''
+
+rule download_WGS_bam:
+    params: job_name = 'download_WGS_bam'
+    output: bam = 'wgs/wgs.bam'
+    shell:
+        '''
+        wget {WGS_BAM_URL} -O {output.bam}
+        '''
+
+###################################################################
+
+
+
 # add phasing information to unphased chamber call files
 rule annotate_assigned_fragments:
     params: job_name = 'annotate_assigned_fragments.{r}'
@@ -209,7 +327,7 @@ rule annotate_assigned_fragments:
 # combine separate files for assembled fragment haplotypes
 rule combine_assigned_fragment_files:
     params: job_name = 'combine_assigned_fragment_files'
-    input:  sep = expand('fragment_haplotype_assignments/{chrom}',chrom=chroms+['chrXY']),
+    input:  sep = expand('fragment_haplotype_assignments/{chrom}',chrom=chroms),  #+['chrXY']
     output: combined = 'fragment_haplotype_assignments/all',
     shell:  'cat {input.sep} > {output.combined}'
 
@@ -224,17 +342,17 @@ rule assign_fragment_haplotypes:
         fragment_haplotype_assignment.assign_fragment_haplotypes(input.frag,input.vcf,output.sep,input.hap)
 
 # assign fragments to assembled haplotypes
-rule assign_fragment_haplotypes_XY:
-    params: job_name = 'assign_fragment_haplotypes_XY'
-    input:  bounds = expand('eric_fragment_boundary_beds/{P[0]}/ch{P[1]}.bed',P=product(cells,chambers)),
-    output: sep = 'fragment_haplotype_assignments/chrXY',
-    run:
-        cell_ch_nos = []
-        for cellno in range(0,3):
-            for chamberno in range(0,24):
-                cell_ch_nos.append((cellno,chamberno))
-
-        fragment_haplotype_assignment.assign_fragment_haplotypes_XY(input.bounds,cell_ch_nos,output.sep)
+#rule assign_fragment_haplotypes_XY:
+#    params: job_name = 'assign_fragment_haplotypes_XY'
+#    input:  bounds = expand('eric_fragment_boundary_beds/{P[0]}/ch{P[1]}.bed',P=product(cells,chambers)),
+#    output: sep = 'fragment_haplotype_assignments/chrXY',
+#    run:
+#        cell_ch_nos = []
+#        for cellno in range(0,3):
+#            for chamberno in range(0,24):
+#                cell_ch_nos.append((cellno,chamberno))
+#
+#        fragment_haplotype_assignment.assign_fragment_haplotypes_XY(input.bounds,cell_ch_nos,output.sep)
 
 # PLOT RESULTS
 rule plot_hapcut2_results:
