@@ -26,8 +26,9 @@ localrules: all, simlinks, pileup_test, make_accuracy_table
 variant_calling_cutoffs = [7,8,9,10,30,50,70,90,110,130,150]
 
 chroms = ['chr{}'.format(i) for i in range(1,23)]
-chroms_set = set(chroms)
 chroms_XY = chroms + ['chrX','chrY']
+chroms_set_XY = set(chroms_XY)
+
 chunksize = int(5e6)
 
 hg19_size_list = [('chr1', 249250621),
@@ -131,7 +132,7 @@ rule all:
         expand('accuracy_reports/{mode}/cutoff10.counts.p',mode=modes),
         expand('accuracy_reports/{mode}/cutoff10.mismatches',mode=modes),
         expand('accuracy_reports/tables/strand_mismatch_{mode}.10.table.txt',mode=modes),
-        'accuracy_reports/tables/unphased.10.table.txt',
+#        'accuracy_reports/tables/unphased.10.table.txt',
 
         #expand('accuracy_reports/unphased/cutoff{cut}.counts.p',cut=variant_calling_cutoffs),
         #"{}/sissor_haplotype_error_genome.png".format(HAPLOTYPE_PLOTS_DIR),
@@ -208,19 +209,32 @@ rule annotate_assigned_fragments:
 # combine separate files for assembled fragment haplotypes
 rule combine_assigned_fragment_files:
     params: job_name = 'combine_assigned_fragment_files'
-    input:  sep = expand('fragment_haplotype_assignments/{chrom}',chrom=chroms),
+    input:  sep = expand('fragment_haplotype_assignments/{chrom}',chrom=chroms+['chrXY']),
     output: combined = 'fragment_haplotype_assignments/all',
     shell:  'cat {input.sep} > {output.combined}'
 
 # assign fragments to assembled haplotypes
 rule assign_fragment_haplotypes:
-    params: job_name = 'assign_fragment_haplotypes.{chrom}'
-    input: frag = 'haplotyping/data/PGP1_ALL/fragmat/cov1_strict/{chrom}',
-           vcf  = 'haplotyping/data/haplotyping_VCFs/{chrom}.vcf',
-           hap  = 'haplotyping/experiments/hapcut2_PGP1_ALL/cov1_strict/{chrom}.output'
-    output: sep = 'fragment_haplotype_assignments/{chrom}',
+    params: job_name = 'assign_fragment_haplotypes.chr{chrom,\d+}'
+    input: frag = 'haplotyping/data/PGP1_ALL/fragmat/cov1_strict/chr{chrom,\d+}',
+           vcf  = 'haplotyping/data/haplotyping_VCFs/chr{chrom,\d+}.vcf',
+           hap  = 'haplotyping/experiments/hapcut2_PGP1_ALL/cov1_strict/chr{chrom,\d+}.output'
+    output: sep = 'fragment_haplotype_assignments/chr{chrom,\d+}',
     run:
         fragment_haplotype_assignment.assign_fragment_haplotypes(input.frag,input.vcf,output.sep,input.hap)
+
+# assign fragments to assembled haplotypes
+rule assign_fragment_haplotypes_XY:
+    params: job_name = 'assign_fragment_haplotypes_XY'
+    input:  bounds = expand('eric_fragment_boundary_beds/{P[0]}/ch{P[1]}.bed',P=product(cells,chambers)),
+    output: sep = 'fragment_haplotype_assignments/chrXY',
+    run:
+        cell_ch_nos = []
+        for cellno in range(0,3):
+            for chamberno in range(0,24):
+                cell_ch_nos.append((cellno,chamberno))
+
+        fragment_haplotype_assignment.assign_fragment_haplotypes_XY(input.bounds,cell_ch_nos,output.sep)
 
 # PLOT RESULTS
 rule plot_hapcut2_results:
@@ -444,7 +458,7 @@ rule filter_haplotyping_VCFs:
 
 rule sort_wgs_SNPs:
     params: job_name  = 'liftover_SNPs',
-    input:  vcf = 'wgs/wgs_hg19.autosomes.unsorted.vcf',
+    input:  vcf = 'wgs/wgs_hg19.autosomesXY.unsorted.vcf',
     output: vcf = 'wgs/wgs_hg19.vcf'
     shell:
         '''cat {input} | vcf-sort -c -p 4 > {output}'''
@@ -452,7 +466,7 @@ rule sort_wgs_SNPs:
 rule filter_wgs_autosomes:
     params: job_name  = 'filter_wgs_autosomes',
     input:  vcf = 'wgs/wgs_hg19.unsorted.vcf',
-    output: vcf = 'wgs/wgs_hg19.autosomes.unsorted.vcf'
+    output: vcf = 'wgs/wgs_hg19.autosomesXY.unsorted.vcf'
     run:
         with open(input.vcf,'r') as inf, open(output.vcf,'w') as outf:
             for line in inf:
@@ -461,7 +475,7 @@ rule filter_wgs_autosomes:
                 el = line.strip().split('\t')
                 if len(el) < 5:
                     continue
-                if el[0] in chroms_set:
+                if el[0] in chroms_set_XY:
                     print(line.strip(),file=outf)
 
 rule liftover_wgs_SNPs:
