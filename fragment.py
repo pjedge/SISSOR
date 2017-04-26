@@ -13,9 +13,11 @@ import pickle
 
 class fragment:
 
-    def __init__(self, seq, name, switch_errors=None, mismatch_errors = None):
+    def __init__(self, seq, name, first_piece = True, last_piece = True):
         self.seq = seq                         # list of (snp index, genomic index, allele call, quality score) tuples
         self.name = name                       # fragment ID / name
+        self.first_piece = first_piece
+        self.last_piece  = last_piece
 
     def __str__(self):
         fragstr = ''

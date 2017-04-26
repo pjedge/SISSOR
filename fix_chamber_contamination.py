@@ -23,7 +23,7 @@ def parse_args():
     parser.add_argument('-f', '--fragments', nargs='?', type = str, help='fragment file to process')
     parser.add_argument('-v', '--vcf_file', nargs='?', type = str, help='vcf file')
     parser.add_argument('-o', '--output', nargs='?', type = str, help='output fragments')
-    parser.add_argument('-t', '--threshold', nargs='?', type = int, help='number of consecutive mismatches with respect to another fragment that count as contamination', default = 3)
+    parser.add_argument('-t', '--threshold', nargs='?', type = int, help='number of consecutive mismatches with respect to another fragment that count as contamination', default = 2)
     parser.add_argument('-m', '--min_cov', nargs='?', type = int, help='filter for only positions with coverage >= this amount', default = 0)
     parser.add_argument('-M', '--mode', nargs='?', type = str, help='processing mode', default='basic')
 
@@ -149,9 +149,15 @@ def split_fragment_hets(frag,min_het_count=3,max_het_frac=0.25):
     if split_occured:
         for i, piece in enumerate(new_fragment_pieces):
             new_name = '{}:H{}'.format(frag.name,i+1)
-            new_fragment_piece_objects.append(fragment.fragment(piece,new_name))
+            first_piece = False
+            last_piece  = False
+            if i == 0 and frag.first_piece:
+                first_piece = True
+            if i == len(new_fragment_pieces) - 1 and frag.last_piece:
+                last_piece = True
+            new_fragment_piece_objects.append(fragment.fragment(piece,new_name,first_piece,last_piece))
     else:
-        new_fragment_piece_objects.append(fragment.fragment(new_fragment_pieces[0],frag.name))
+        new_fragment_piece_objects.append(fragment.fragment(new_fragment_pieces[0],frag.name,frag.first_piece,frag.last_piece))
     return new_fragment_piece_objects
 
 def split_flist_hets(flist,min_het_count=3,max_het_frac=0.25):
@@ -328,6 +334,7 @@ def fragment_comparison_split(flist, threshold=3):
             new_flist.append(f1)
         else:
             # chop up fragment where necessary and add pieces to fragment list
+            new_flist_temp = []
             new_seq = []
             name_ctr = 1
             for allele in f1.seq:
@@ -337,7 +344,7 @@ def fragment_comparison_split(flist, threshold=3):
                         print("Breaking {} at pos {}".format(f1.name,allele[0]))
                     if len(new_seq) > 1:
                         new_name = "{}:S{}".format(f1.name,name_ctr)
-                        new_flist.append(fragment.fragment(new_seq,new_name))
+                        new_flist_temp.append(fragment.fragment(new_seq,new_name,False,False))
                         name_ctr += 1
 
                     new_seq = []
@@ -346,7 +353,14 @@ def fragment_comparison_split(flist, threshold=3):
 
             if len(new_seq) > 1:
                 new_name = "{}:S{}".format(f1.name,name_ctr)
-                new_flist.append(fragment.fragment(new_seq,new_name))
+                new_flist_temp.append(fragment.fragment(new_seq,new_name,False,False))
+
+            if f1.first_piece:
+                new_flist_temp[0].first_piece = True
+            if f1.last_piece:
+                new_flist_temp[-1].last_piece = True
+
+            new_flist += new_flist_temp
 
     return new_flist
 
@@ -355,14 +369,12 @@ def filter_discordant_fragments_SER(flist, SER_threshold):
     flist = sorted(flist,key=lambda x: x.seq[0][0])
 
     N = len(flist)
-    #SER_total = np.zeros((N,N),dtype='float')
-    #SER_err = np.zeros((N,N),dtype='float')
+
     new_flist = []
 
     for i in range(N):
         f1 = flist[i]
-#        total = 0
-#        err   = 0
+
         errs = []
         e_total = 0
         t_total = 0
@@ -371,22 +383,11 @@ def filter_discordant_fragments_SER(flist, SER_threshold):
             f2 = flist[j]
 
             if not overlap(f1,f2,2):
-                #SER_total[i,j] = -1
-                #SER_total[j,i] = -1
-                #SER_err[i,j] = -1
-                #SER_err[j,i] = -1
                 continue
 
             e, t = total_SER(f1,f2)
             e_total += e
             t_total += t
-            #SER_total[i,j] = t
-            #SER_total[j,i] = t
-            #SER_err[i,j] = e
-            #SER_err[j,i] = e
-#            total += t
-#            err   += e
-            #errs.append(e/t)
 
         if t_total <= 10 or e_total / t_total < SER_threshold: #len(errs) <= 1 or min(errs) < SER_threshold:
             new_flist.append(f1)
@@ -421,14 +422,28 @@ def filter_fragment_coverage(flist,coverage):
         # if the fragment has at least 2 alleles after filtering add it to new list
         if len(new_seq) >= 2:
 
-            filtered_flist.append(fragment.fragment(new_seq,f.name))
+            filtered_flist.append(fragment.fragment(new_seq,f.name,f.first_piece,f.last_piece))
 
     return filtered_flist
 
 def add_new_boundaries(flist):
 
     for i in range(len(flist)):
-        flist[i].name = '{}:{}-{}'.format(flist[i].name,flist[i].seq[0][1]+1,flist[i].seq[-1][1]+1)
+
+        bounds_str = flist[i].name.split(':')[1]
+        orig_start, orig_end = [int(x) for x in bounds_str.split('-')]
+
+        if flist[i].first_piece:
+            start = orig_start
+        else:
+            start = flist[i].seq[0][1]+1
+
+        if flist[i].last_piece:
+            end = orig_end
+        else:
+            end = flist[i].seq[-1][1]+1
+
+        flist[i].name = '{}:{}-{}'.format(flist[i].name,start,end)
 
         for a in flist[i].seq:
             assert(a[2] != 'M') # one last check that we didn't leave in a heterozygous call
@@ -454,7 +469,7 @@ def filter_het_positions(flist):
         # if the fragment has at least 2 alleles after filtering add it to new list
         if len(new_seq) >= 2:
 
-            filtered_flist.append(fragment.fragment(new_seq,f.name))
+            filtered_flist.append(fragment.fragment(new_seq,f.name,f.first_piece,f.last_piece))
 
     return filtered_flist
 
@@ -492,7 +507,7 @@ def filter_on_VCF(flist, vcf_filter):
         # if the fragment has at least 2 alleles after filtering add it to new list
         if len(new_seq) >= 2:
 
-            filtered_flist.append(fragment.fragment(new_seq,f.name))
+            filtered_flist.append(fragment.fragment(new_seq,f.name,f.first_piece,f.last_piece))
 
     return filtered_flist
 
