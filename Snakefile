@@ -12,6 +12,7 @@ import fileIO
 from plot_sissor import plot_sissor
 from create_hapcut_fragment_matrix_CCF import create_hapcut_fragment_matrix_CCF
 from fix_chamber_contamination import fix_chamber_contamination
+import generate_tables
 #import run_tools
 import fragment
 import fileIO
@@ -179,6 +180,9 @@ rule all:
         expand('accuracy_reports/{mode}/cutoff10.mismatches',mode=modes),
         expand('accuracy_reports/tables/strand_mismatch_{mode}.10.table.txt',mode=modes),
         'accuracy_reports/tables/unphased.10.table.txt',
+        'accuracy_reports/tables/unphased_call_accuracy_master_table.txt',
+        'accuracy_reports/tables/phased_call_accuracy_master_table.txt'
+
 
         #expand('wgs/lifted/{r}.vcf',r=grch38_regions),
         #expand('ref_dicts/{r}.ref_dict.p',r=regions),
@@ -186,6 +190,23 @@ rule all:
         #"{}/sissor_haplotype_error_genome.png".format(HAPLOTYPE_PLOTS_DIR),
         #
         #expand('accuracy_reports/tables/{mode}.10.table.txt',mode=modes),
+
+rule make_phased_accuracy_master_table:
+    params: job_name = 'make_phased_accuracy_master_table'
+    input:  same_cell = 'accuracy_reports/same_cell/cutoff10.counts.p',
+            all_cell = 'accuracy_reports/all_cell/cutoff10.counts.p',
+            cross_cell = 'accuracy_reports/cross_cell/cutoff10.counts.p',
+            ind_same_cell = 'accuracy_reports/ind_same_cell/cutoff10.counts.p',
+    output: table = 'accuracy_reports/tables/phased_call_accuracy_master_table.txt',
+    run:
+        generate_tables.generate_phased_calls_table(output.table, input.same_cell, input.all_cell, input.cross_cell, input.ind_same_cell)
+
+rule make_unphased_accuracy_master_table:
+    params: job_name = 'make_unphased_accuracy_master_table'
+    input:  counts_files = expand('accuracy_reports/unphased/cutoff{c}.counts.p',c=variant_calling_cutoffs)
+    output: table = 'accuracy_reports/tables/phased_call_accuracy_master_table.txt'
+    run:
+        generate_tables.generate_unphased_calls_table(output.table, input.counts_files, variant_calling_cutoffs)
 
 rule make_accuracy_table:
     params: job_name = 'make_accuracy_table.{report_name}.{cut}'
@@ -679,7 +700,6 @@ rule download_GMS:
 rule call_alleles:
     params: job_name = 'call_alleles.{r}'
     input:  pileup = 'pileups/split/{r}.pileup',
-            #boundary_files = expand('fragment_boundary_beds/{P[0]}/ch{P[1]}.bed',P=product(cells, chambers)),
             MDA_dist = 'parameters/MDA_dist.p',
             cov_frac_dist = 'parameters/cov_frac_dist.p',
             p_null = 'parameters/p_null.p',
@@ -720,7 +740,6 @@ rule estimate_parameters:
 rule obtain_counts_parallel:
     params: job_name = 'obtain_counts_parallel.{r}'
     input:  pileup = 'pileups/split/{r}.pileup',
-            #boundary_files = expand('fragment_boundary_beds/{P[0]}/ch{P[1]}.bed',P=product(cells, chambers))
     output: 'parameters/split/chrX_MDA_fracs.{r}.p',
             'parameters/split/chrX_covs.{r}.p',
             'parameters/split/chamber_position_counts.{r}.p',
