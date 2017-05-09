@@ -59,11 +59,11 @@ filter_CCF:
 accuracy_aggregate:
     walltime: '5:00:00'
 
-accuracy_count:
-    walltime: '10:00:00'
+accuracy_count_phased:
+    walltime: '3:00:00'
 
-accuracy_count_strand_pairing:
-    walltime: '10:00:00'
+accuracy_count_unphased:
+    walltime: '3:00:00'
 
 liftover_wgs_SNPs:
     walltime: '40:00:00'
@@ -83,3 +83,6 @@ call_alleles:
 
 pileup:
     walltime: '10:00:00'
+
+count_differences_VCF:
+    walltime: '2:00:00'

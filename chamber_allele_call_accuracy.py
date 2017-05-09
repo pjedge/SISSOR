@@ -14,8 +14,7 @@ import random
 from itertools import combinations
 
 count_key = namedtuple('count_key', 'is_SNP matches_ref ref_genotype')
-count_key_sp = namedtuple('count_key_sp', 'is_SNP matches_CGI matches_WGS matches_BAC matches_third_chamber')
-count_key_ind = namedtuple('count_key_ind', 'cell is_SNP matches_CGI matches_WGS matches_BAC matches_third_chamber')
+count_key_sp = namedtuple('count_key_sp', 'cell is_SNP matches_CGI matches_BAC matches_third_chamber')
 
 GMS_LIMIT = 0.5
 chroms = ['chr{}'.format(i) for i in range(1,23)]
@@ -133,6 +132,9 @@ def generate_ref_dict(GFF_file, WGS_VCF_file, BAC_VCF_files, HG19, region, ref_d
 
     hg19_fasta = pysam.FastaFile(HG19)
 
+    TOTAL_POS = 0
+    TOTAL_SNP = 0
+
     # add calls observed in one CGI dataset to a dictionary
     with open(GFF_file,'r') as gff:
         for line in gff:
@@ -245,6 +247,12 @@ def generate_ref_dict(GFF_file, WGS_VCF_file, BAC_VCF_files, HG19, region, ref_d
             if (vcf_chrom,vcf_pos) in cgi_dict and alleles == cgi_dict[(vcf_chrom,vcf_pos)]:
                 ref_dict['CGI/WGS'][(vcf_chrom,vcf_pos)] = alleles
 
+
+                TOTAL_POS += 1
+                if alleles != {ref_allele}:
+                    TOTAL_SNP += 1
+
+
     # add SNVs seen in BAC VCF files to dictionary
     for BAC_VCF in BAC_VCF_files:
         with open(BAC_VCF,'r') as inf:
@@ -281,6 +289,17 @@ def generate_ref_dict(GFF_file, WGS_VCF_file, BAC_VCF_files, HG19, region, ref_d
                     continue
 
                 ref_dict['BAC'][(vcf_chrom,vcf_pos)] = alleles
+
+
+
+    count_dump = ref_dict_pickle + '.TOTAL_COUNT'
+    with open(count_dump,'w') as outf:
+        print(TOTAL_POS,file=outf)
+
+    snp_dump = ref_dict_pickle + '.SNP_COUNT'
+    with open(snp_dump,'w') as outf:
+        print(TOTAL_SNP,file=outf)
+
 
     pickle.dump(ref_dict,open(ref_dict_pickle,'wb'))
 
@@ -665,9 +684,9 @@ def accuracy_count_phased(chamber_call_file, ref_dict_pickle, GMS_file, cutoff, 
 
                 if mode == 'ind_same_cell':
                     assert(matched_chambers[0][0] == matched_chambers[1][0]) # have to be same cell...
-                    counts[count_key_ind(matched_chambers[0][0],SNV,CGI_match,WGS_match,BAC_match,third_chamber_match)] += 1 # same as count_key_sp but also saves the cell.
+                    counts[count_key_sp(matched_chambers[0][0],SNV,CGI_match,BAC_match,third_chamber_match)] += 1
                 else:
-                    counts[count_key_sp(SNV,CGI_match,WGS_match,BAC_match,third_chamber_match)] += 1
+                    counts[count_key_sp(None,SNV,CGI_match,BAC_match,third_chamber_match)] += 1
 
     pickle.dump(counts,open(counts_pickle_file,'wb'))
     pickle.dump(strand_mismatch_counts,open(strand_mismatch_pickle,'wb'))

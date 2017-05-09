@@ -16,6 +16,7 @@ import generate_tables
 #import run_tools
 import fragment
 import fileIO
+import os
 
 import filter_vcf
 import calculate_haplotype_statistics as chs
@@ -93,6 +94,12 @@ for chrom, chrlen in grch38_size_list:
 
 grch38_regions = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in grch38_chunklist]
 
+grch38_regions_noXY = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in grch38_chunklist if chrom not in ['chrX','chrY']]
+grch38_regions_XYonly = ['{}.{}.{}'.format(chrom,start,stop) for chrom,start,stop in grch38_chunklist if chrom in ['chrX','chrY']]
+grch38_chunklist_noXY = [(chrom,start,stop) for chrom,start,stop in grch38_chunklist if chrom not in ['chrX','chrY']]
+grch38_chunklist_XYonly = [(chrom,start,stop) for chrom,start,stop in grch38_chunklist if chrom in ['chrX','chrY']]
+
+
 # create chunks of hg19
 # return list of (chrom,start,stop) tuples. stop is inclusive
 chunklist = []
@@ -124,6 +131,7 @@ HG19     = '/oasis/tscc/scratch/pedge/data/genomes/hg19/hg19.fa' #'/home/wkchu/z
 CGI_SNPs1 = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/BAM/ns.gff'
 CGI_SNPs2 = '/oasis/tscc/scratch/wkchu/SISSOR/NewPGP1REF/PGP-Harvard-var-hu43860C-20160106T060652Z.vcf'
 WGS_BAM_URL = 'https://www.encodeproject.org/files/ENCFF713HUF/@@download/ENCFF713HUF.bam'
+GRCH38   = '/oasis/tscc/scratch/pedge/data/genomes/grch38/grch38.fa'
 GRCH38_URL = 'https://www.encodeproject.org/files/GRCh38_no_alt_analysis_set_GCA_000001405.15/@@download/GRCh38_no_alt_analysis_set_GCA_000001405.15.fasta.gz'
 
 BAC_VCFs = ['/home/wkchu/BACPoolPileup/Indx73.bac.pileup.vcf',
@@ -168,18 +176,22 @@ modes = ['same_cell','all_cell','cross_cell','ind_same_cell']
 #modes = ['cross_cell']
 rule all:
     input:
-        expand('accuracy_reports/{mode}/cutoff10.counts.p',mode=modes),
-        expand('accuracy_reports/{mode}/cutoff10.mismatches',mode=modes),
-        expand('accuracy_reports/tables/strand_mismatch_{mode}.10.table.txt',mode=modes),
         'accuracy_reports/tables/unphased_call_accuracy_master_table.txt',
-        'accuracy_reports/tables/phased_call_accuracy_master_table.txt'
+        'accuracy_reports/tables/phased_call_accuracy_master_table.txt',
+        'accuracy_reports/tables/strand_strand_mismatch_rates_table.txt',
+        'accuracy_reports/tables/strand_strand_nucleotide_substitutions.png',
 
-#        'accuracy_reports/tables/unphased.10.table.txt',
-
+        #expand('accuracy_reports/{mode}/cutoff10.counts.p',mode=modes),
+        #expand('accuracy_reports/{mode}/cutoff10.mismatches',mode=modes),
+        #expand('accuracy_reports/tables/strand_mismatch_{mode}.10.table.txt',mode=modes),
+        #expand('wgs/lifted/{r}.vcf',r=grch38_regions),
+        #expand('ref_dicts/{r}.ref_dict.p',r=regions),
         #expand('accuracy_reports/unphased/cutoff{cut}.counts.p',cut=variant_calling_cutoffs),
         #"{}/sissor_haplotype_error_genome.png".format(HAPLOTYPE_PLOTS_DIR),
-        #expand('ref_dicts/{r}.ref_dict.p',r=regions),
+        #
         #expand('accuracy_reports/tables/{mode}.10.table.txt',mode=modes),
+
+
 
 rule make_phased_accuracy_master_table:
     params: job_name = 'make_phased_accuracy_master_table'
@@ -194,9 +206,25 @@ rule make_phased_accuracy_master_table:
 rule make_unphased_accuracy_master_table:
     params: job_name = 'make_unphased_accuracy_master_table'
     input:  counts_files = expand('accuracy_reports/unphased/cutoff{c}.counts.p',c=variant_calling_cutoffs)
-    output: table = 'accuracy_reports/tables/phased_call_accuracy_master_table.txt'
+    output: table = 'accuracy_reports/tables/unphased_call_accuracy_master_table.txt'
     run:
         generate_tables.generate_unphased_calls_table(output.table, input.counts_files, variant_calling_cutoffs)
+
+rule make_strand_strand_mismatch_table:
+    params: job_name = 'make_strand_strand_mismatch_table'
+    input:  same_cell = 'accuracy_reports/strand_mismatch_same_cell/cutoff10.counts.p',
+            all_cell = 'accuracy_reports/strand_mismatch_all_cell/cutoff10.counts.p',
+            cross_cell = 'accuracy_reports/strand_mismatch_cross_cell/cutoff10.counts.p'
+    output: table = 'accuracy_reports/tables/strand_strand_mismatch_rates_table.txt',
+    run:
+        generate_tables.generate_strand_strand_mismatch_table(output.table, input.same_cell, input.all_cell, input.cross_cell)
+
+rule generate_nucleotide_substitution_plot:
+    params: job_name = 'generate_nucleotide_substitution_plot'
+    input:  same_cell = 'accuracy_reports/strand_mismatch_same_cell/cutoff10.counts.p',
+    output: plot = 'accuracy_reports/tables/strand_strand_nucleotide_substitutions.png',
+    run:
+        generate_tables.generate_nucleotide_substitution_plot(output.plot, input.same_cell)
 
 rule make_accuracy_table:
     params: job_name = 'make_accuracy_table.{report_name}.{cut}'
@@ -222,15 +250,17 @@ rule generate_ref_dict:
     params: job_name = 'generate_ref_dict.{chrom}.{start}.{end}'
     input:  gff = CGI_SNPs1,
             hg19 = HG19,
-            wgs_vcf = 'wgs/freebayes_hg19/{chrom}.{start}.{end}.vcf',
-            bac_vcfs = BAC_VCFs
+            wgs_done = 'wgs/freebayes_hg19/{chrom}.done', #wgs_vcf = 'wgs/freebayes_hg19/{chrom}.{start}.{end}.vcf',
+            bac_vcfs = BAC_VCFs,
     output: pickle = 'ref_dicts/{chrom}.{start}.{end}.ref_dict.p'
     run:
         reg_chrom = str(wildcards.chrom)
         reg_start = int(wildcards.start)
         reg_end   = int(wildcards.end)
         region = (reg_chrom, reg_start, reg_end)
-        caca.generate_ref_dict(input.gff, input.wgs_vcf, input.bac_vcfs, input.hg19, region, output.pickle)
+        wgs_vcf = 'wgs/freebayes_hg19/{}.{}.{}.vcf'.format(reg_chrom, reg_start, reg_end)
+        assert(os.path.isfile(wgs_vcf))
+        caca.generate_ref_dict(input.gff, wgs_vcf, input.bac_vcfs, input.hg19, region, output.pickle)
 
 rule accuracy_count_unphased:
     params: job_name = 'accuracy_count_unphased.{r}'
@@ -272,12 +302,39 @@ rule split_freebayes_wgs:
         chr_chunks = [(chrom,start,end) for (chrom,start,end) in chunklist if chrom == wildcards.c]
         caca.split_vcf(input.vcf, chr_chunks, outfiles)
 
-rule sort_freebayes_wgs:
+#rule sort_freebayes_wgs:
+#    params: job_name  = 'sort_freebayes_wgs.{c}',
+#    input:  expand('wgs/lifted/{r}.vcf',r=grch38_regions),
+#    output: 'wgs/lifted_sorted/{c}.vcf'
+#    run:
+#        infiles =  [f for (chrom,start,end),f in zip(grch38_chunklist,input) if chrom == wildcards.c]
+#        shell('''
+#        grep '^#' {infiles[0]} > {output}
+#        cat {infiles} |
+#        grep -v '^#' |
+#        vcf-sort -c -p 4 >> {output}
+#        ''')
+
+
+rule sort_freebayes_wgs_autosomes:
     params: job_name  = 'sort_freebayes_wgs.{c}',
-    input:  expand('wgs/lifted/{r}.vcf',r=grch38_regions),
-    output: 'wgs/lifted_sorted/{c}.vcf'
+    input:  expand('wgs/lifted/{r}.vcf',r=grch38_regions_noXY),
+    output: 'wgs/lifted_sorted/{c,\d+}.vcf'
     run:
-        infiles =  [f for (chrom,start,end),f in zip(grch38_chunklist,input) if chrom == wildcards.c]
+        infiles =  [f for (chrom,start,end),f in zip(grch38_chunklist_noXY,input) if chrom == 'chr'+wildcards.c]
+        shell('''
+        grep '^#' {infiles[0]} > {output}
+        cat {infiles} |
+        grep -v '^#' |
+        vcf-sort -c -p 4 >> {output}
+        ''')
+
+rule sort_freebayes_wgs_XY:
+    params: job_name  = 'sort_freebayes_wgs.{c}',
+    input:  expand('wgs/lifted/{r}.vcf',r=grch38_regions_XYonly),
+    output: 'wgs/lifted_sorted/chr{c,X|Y}.vcf'
+    run:
+        infiles =  [f for (chrom,start,end),f in zip(grch38_chunklist_XYonly,input) if chrom == 'chr'+wildcards.c]
         shell('''
         grep '^#' {infiles[0]} > {output}
         cat {infiles} |
@@ -571,7 +628,7 @@ rule fix_fragmat_BAC:
     output:
         fixed = "haplotyping/data/BAC_frags_fixed/{c}"
     run:
-        fix_chamber_contamination(input.frags,input.var_vcfs,output.fixed,threshold=2, min_coverage=0,mode='basic',vcf_filter=None) #input.WGS_variants)
+        fix_chamber_contamination(input.frags,input.var_vcfs,output.fixed,threshold=2, min_coverage=0,mode='basic',vcf_filter=input.WGS_variants)
 
 #rule filter_CGI_VCF:
 #    params: job_name  = "filter_CGI_VCF",
