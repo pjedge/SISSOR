@@ -16,7 +16,6 @@ from itertools import combinations
 count_key = namedtuple('count_key', 'is_SNP matches_ref ref_genotype')
 count_key_sp = namedtuple('count_key_sp', 'cell is_SNP matches_CGI matches_BAC matches_third_chamber')
 
-GMS_LIMIT = 0.5
 chroms = ['chr{}'.format(i) for i in range(1,23)]
 bases = {'A','T','G','C'}
 n_chambers = 24
@@ -61,43 +60,6 @@ def split_vcf(input_vcf, chunklist, output_vcfs):
 
             # write to lifted over vcf
             print(line,end='',file=output)
-
-    if not output.closed:
-        output.close()
-
-# this takes the genome mappability score (GMS) files and splits them into
-# convenient 5 Mb chunks, corresponding to regions called by sissorhands
-def split_gms(infiles, chunklist, outputlst):
-
-    chunks_output = list(zip(chunklist, outputlst))
-
-    for infile in infiles:
-        (chrom, start, stop), outputfile = chunks_output.pop(0)
-        assert(start == 1)              # should be beginning of chrom
-        assert(chrom+'.gms' in infile)  # file should have chrom name
-        output = open(outputfile,'w')
-        with open(infile,'r') as gms:
-            for line in gms:
-                if line[0] == '#' or len(line) < 3:
-                    continue
-                el = line.strip().split('\t')
-
-                gms_chrom     = el[0]
-                gms_pos       = int(el[1])
-
-                if gms_pos > stop:
-                    output.close()
-                    if chunks_output == []:
-                        break
-                    (chrom, start, stop), outputfile = chunks_output.pop(0)
-                    output = open(outputfile,'w')
-
-                # make sure we're really on the current region
-                assert(gms_chrom == chrom)
-                assert(gms_pos >= start)
-                assert(gms_pos <= stop)
-
-                print(line,end='',file=output)
 
     if not output.closed:
         output.close()
@@ -309,24 +271,9 @@ def generate_ref_dict(GFF_file, WGS_VCF_file, BAC_VCF_files, HG19, region, ref_d
 # cutoff is the minimum probability of an allele call to use it
 # result outfile simply contains the counts of match vs mismatched alleles
 # mismatch_outfile prints locations of mismatched allele calls
-def accuracy_count_unphased(chamber_call_file, ref_dict_pickle, GMS_file, cutoff, counts_pickle_file, mismatch_outfile, bedfile_filter=None): #WGS_VCF_file,
+def accuracy_count_unphased(chamber_call_file, ref_dict_pickle, cutoff, counts_pickle_file, mismatch_outfile, bedfile_filter=None): #WGS_VCF_file,
 
     ref_dict = pickle.load(open(ref_dict_pickle,'rb'))
-    gms_set    = set()
-
-    if FILTER_LOW_MAPPABILITY:
-        with open(GMS_file,'r') as GMS:
-            for line in GMS:
-                if line[0] == '#' or len(line) < 3:
-                    continue
-                el = line.strip().split('\t')
-
-                chrom     = el[0]
-                pos       = int(el[1])
-                gms_score = float(el[5])
-
-                if gms_score > GMS_LIMIT:
-                    gms_set.add((chrom, pos))
 
     counts = defaultdict(int)
 
@@ -367,9 +314,6 @@ def accuracy_count_unphased(chamber_call_file, ref_dict_pickle, GMS_file, cutoff
                     continue
                 #######################################################################
                 #######################################################################
-
-            if FILTER_LOW_MAPPABILITY and (ccf_chrom, ccf_pos) not in gms_set:  # poor mappability
-                continue
 
             ref_allele = ccf_line[2]
 
@@ -444,7 +388,7 @@ def accuracy_count_unphased(chamber_call_file, ref_dict_pickle, GMS_file, cutoff
 # cutoff is the minimum probability of an allele call to use it
 # result outfile simply contains the counts of match vs mismatched alleles
 # mismatch_outfile prints locations of mismatched allele calls
-def accuracy_count_phased(chamber_call_file, ref_dict_pickle, GMS_file, cutoff, counts_pickle_file, mismatch_outfile, strand_mismatch_pickle, separate_haplotypes = True, mode='all_cell',no_adjacent_chambers=True): #WGS_VCF_file,
+def accuracy_count_phased(chamber_call_file, ref_dict_pickle, cutoff, counts_pickle_file, mismatch_outfile, strand_mismatch_pickle, separate_haplotypes = True, mode='all_cell',no_adjacent_chambers=True): #WGS_VCF_file,
 
     if mode not in ['same_cell','all_cell','cross_cell','ind_same_cell']:
         raise ValueError('Invalid accuracy count mode.')
@@ -457,21 +401,6 @@ def accuracy_count_phased(chamber_call_file, ref_dict_pickle, GMS_file, cutoff, 
         cross_cell = True
 
     ref_dict = pickle.load(open(ref_dict_pickle,'rb'))
-    gms_set    = set()
-
-    if FILTER_LOW_MAPPABILITY:
-        with open(GMS_file,'r') as GMS:
-            for line in GMS:
-                if line[0] == '#' or len(line) < 3:
-                    continue
-                el = line.strip().split('\t')
-
-                chrom     = el[0]
-                pos       = int(el[1])
-                gms_score = float(el[5])
-
-                if gms_score > GMS_LIMIT:
-                    gms_set.add((chrom, pos))
 
     counts = defaultdict(int)
     strand_mismatch_counts = defaultdict(int)
@@ -482,9 +411,6 @@ def accuracy_count_phased(chamber_call_file, ref_dict_pickle, GMS_file, cutoff, 
             ccf_line = line.strip().split('\t')
             ccf_chrom = ccf_line[0]
             ccf_pos   = int(ccf_line[1])
-
-            if FILTER_LOW_MAPPABILITY and (ccf_chrom, ccf_pos) not in gms_set:  # poor mappability
-                continue
 
             ref_allele = ccf_line[2]
 

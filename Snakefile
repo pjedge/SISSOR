@@ -22,6 +22,53 @@ import filter_vcf
 import calculate_haplotype_statistics as chs
 localrules: all, simlinks, pileup_test, make_accuracy_table
 
+
+BCFTOOLS = '/path/to/bcftools' #'/opt/biotools/bcftools/bin/bcftools'
+SAMTOOLS = '/path/to/samtools' #'/opt/biotools/samtools/1.3/bin/samtools'
+PICARD   = '/path/to/picard.jar' #'/home/pedge/installed/picard.jar'
+CROSSMAP = '/path/to/CrossMap.py' #'/home/pedge/installed/opt/python/bin/CrossMap.py'
+HAPCUT2  = '/path/to/HAPCUT2' #'/home/pedge/git/hapcut2/build/HAPCUT2'
+PYPY     = '/path/to/pypy3.3' #'/home/pedge/installed/pypy3.3-5.5-alpha-20161013-linux_x86_64-portable/bin/pypy3.3'
+WGS_VCF_URL = 'https://www.encodeproject.org/files/ENCFF995BBX/@@download/ENCFF995BBX.vcf.gz'
+HG19     = '/path/to/hg19.fa' #'/oasis/tscc/scratch/pedge/data/genomes/hg19/hg19.fa' #'/home/wkchu/zhang_lab_oasis/resources_v2.8_b37/human_g1k_v37_decoy.fasta'
+CGI_SNPs1 = '/path/to/CGI_reference.gff' # Complete Genomics reference dataset for PGP1 in GFF format #'/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/BAM/ns.gff'
+WGS_BAM_URL = 'https://www.encodeproject.org/files/ENCFF713HUF/@@download/ENCFF713HUF.bam' # URL for 60x WGS of PGP1f cells from ENCODE
+GRCH38   = '/path/to/grch38.fa' #'/oasis/tscc/scratch/pedge/data/genomes/grch38/grch38.fa'
+GRCH38_URL = 'https://www.encodeproject.org/files/GRCh38_no_alt_analysis_set_GCA_000001405.15/@@download/GRCh38_no_alt_analysis_set_GCA_000001405.15.fasta.gz'
+
+# a collection of BAC Libraries for PGP1, each in VCF format.
+BAC_VCFs = ['/path/to/BAC_library1.vcf','/path/to/BAC_library2.vcf'] #['/home/wkchu/BACPoolPileup/Indx73.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx74.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx75.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx76.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx77.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx78.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx79.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx80.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx81.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx82.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx83.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx84.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx85.2.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx85.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx86.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx87.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx88.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx89.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx90.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx91.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx92.2.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx92.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx93.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx94.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx95.bac.pileup.vcf',
+#'/home/wkchu/BACPoolPileup/Indx96.bac.pileup.vcf']
+
+# path to directories with the 3 SISSOR Library BAM files.
+PGP1_21_dir = '/path/to/SISSOR_library1_dir' #'/oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/BAM'
+PGP1_22_dir = '/path/to/SISSOR_library2_dir' #'/oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/2016OctMergedBAM'
+PGP1_A1_dir = '/path/to/SISSOR_library3_dir' #'/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/2016OctMergedBAM'
+
 # cutoff values are phred scaled probability of error
 # so 30 => 0.999 accuracy
 # and 50 => 0.99999 accuracy
@@ -32,6 +79,8 @@ chroms_XY = chroms + ['chrX','chrY']
 chroms_set_XY = set(chroms_XY)
 
 chunksize = int(5e6)
+
+# break the genome into 5 Mb chunks for parallel base calling with SISSORhands and Freebayes
 
 grch38_size_list = [('chr1', 248956422),
  ('chr2', 242193529),
@@ -120,79 +169,24 @@ cells = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
 chambers_pad = ['{0:02d}'.format(c) for c in chambers]
 
-BCFTOOLS = '/opt/biotools/bcftools/bin/bcftools'
-SAMTOOLS = '/opt/biotools/samtools/1.3/bin/samtools'
-PICARD   = '/home/pedge/installed/picard.jar'
-CROSSMAP = '/home/pedge/installed/opt/python/bin/CrossMap.py'
-HAPCUT2  = '/home/pedge/git/hapcut2/build/HAPCUT2'
-PYPY     = '/home/pedge/installed/pypy3.3-5.5-alpha-20161013-linux_x86_64-portable/bin/pypy3.3'
-WGS_VCF_URL = 'https://www.encodeproject.org/files/ENCFF995BBX/@@download/ENCFF995BBX.vcf.gz'
-HG19     = '/oasis/tscc/scratch/pedge/data/genomes/hg19/hg19.fa' #'/home/wkchu/zhang_lab_oasis/resources_v2.8_b37/human_g1k_v37_decoy.fasta'
-CGI_SNPs1 = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/BAM/ns.gff'
-CGI_SNPs2 = '/oasis/tscc/scratch/wkchu/SISSOR/NewPGP1REF/PGP-Harvard-var-hu43860C-20160106T060652Z.vcf'
-WGS_BAM_URL = 'https://www.encodeproject.org/files/ENCFF713HUF/@@download/ENCFF713HUF.bam'
-GRCH38   = '/oasis/tscc/scratch/pedge/data/genomes/grch38/grch38.fa'
-GRCH38_URL = 'https://www.encodeproject.org/files/GRCh38_no_alt_analysis_set_GCA_000001405.15/@@download/GRCh38_no_alt_analysis_set_GCA_000001405.15.fasta.gz'
-
-BAC_VCFs = ['/home/wkchu/BACPoolPileup/Indx73.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx74.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx75.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx76.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx77.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx78.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx79.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx80.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx81.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx82.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx83.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx84.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx85.2.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx85.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx86.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx87.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx88.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx89.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx90.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx91.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx92.2.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx92.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx93.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx94.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx95.bac.pileup.vcf',
-'/home/wkchu/BACPoolPileup/Indx96.bac.pileup.vcf']
-
-PGP1_21_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/BAM'
-PGP1_22_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/2016OctMergedBAM'#'/oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/previous/BAM'
-PGP1_A1_dir = '/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/2016OctMergedBAM'#'/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/HiSeqCombinedBAM'
-
 HAPLOTYPE_ERROR_RATES_DIR = 'haplotyping/error_rates'
 HAPLOTYPE_PLOTS_DIR       = 'haplotyping/plots'
 HAPLOTYPE_EXP_DIR         = 'haplotyping/experiments'
-
 haplotyping_VCF_dir      = 'haplotyping/data/haplotyping_VCFs'
 BAC_VCF_dir    = 'haplotyping/data/PGP1_VCFs_BACindex'
 
 modes = ['same_cell','all_cell','cross_cell','ind_same_cell']
-#modes = ['cross_cell']
+
+# generate all tables and results.
 rule all:
     input:
         'accuracy_reports/tables/unphased_call_accuracy_master_table.txt',
         'accuracy_reports/tables/phased_call_accuracy_master_table.txt',
         'accuracy_reports/tables/strand_strand_mismatch_rates_table.txt',
         'accuracy_reports/tables/strand_strand_nucleotide_substitutions.png',
+        "{}/sissor_haplotype_error_genome.png".format(HAPLOTYPE_PLOTS_DIR),
 
-        #expand('accuracy_reports/{mode}/cutoff10.counts.p',mode=modes),
-        #expand('accuracy_reports/{mode}/cutoff10.mismatches',mode=modes),
-        #expand('accuracy_reports/tables/strand_mismatch_{mode}.10.table.txt',mode=modes),
-        #expand('wgs/lifted/{r}.vcf',r=grch38_regions),
-        #expand('ref_dicts/{r}.ref_dict.p',r=regions),
-        #expand('accuracy_reports/unphased/cutoff{cut}.counts.p',cut=variant_calling_cutoffs),
-        #"{}/sissor_haplotype_error_genome.png".format(HAPLOTYPE_PLOTS_DIR),
-        #
-        #expand('accuracy_reports/tables/{mode}.10.table.txt',mode=modes),
-
-
-
+# make a table showing the accuracy of same-haplotype strand-matched calls from SISSOR.
 rule make_phased_accuracy_master_table:
     params: job_name = 'make_phased_accuracy_master_table'
     input:  same_cell = 'accuracy_reports/same_cell/cutoff10.counts.p',
@@ -203,6 +197,7 @@ rule make_phased_accuracy_master_table:
     run:
         generate_tables.generate_phased_calls_table(output.table, input.same_cell, input.all_cell, input.cross_cell, input.ind_same_cell)
 
+# make a table showing the accuracy of the SISSORhands consensus variant caller
 rule make_unphased_accuracy_master_table:
     params: job_name = 'make_unphased_accuracy_master_table'
     input:  counts_files = expand('accuracy_reports/unphased/cutoff{c}.counts.p',c=variant_calling_cutoffs)
@@ -210,6 +205,7 @@ rule make_unphased_accuracy_master_table:
     run:
         generate_tables.generate_unphased_calls_table(output.table, input.counts_files, variant_calling_cutoffs)
 
+# make a table showing rates of strand-strand mismatches, presumably due to MDA
 rule make_strand_strand_mismatch_table:
     params: job_name = 'make_strand_strand_mismatch_table'
     input:  same_cell = 'accuracy_reports/strand_mismatch_same_cell/cutoff10.counts.p',
@@ -219,6 +215,7 @@ rule make_strand_strand_mismatch_table:
     run:
         generate_tables.generate_strand_strand_mismatch_table(output.table, input.same_cell, input.all_cell, input.cross_cell)
 
+# make a plot showing the rate of nucleotide substitutions between SISSOR strands
 rule generate_nucleotide_substitution_plot:
     params: job_name = 'generate_nucleotide_substitution_plot'
     input:  same_cell = 'accuracy_reports/strand_mismatch_same_cell/cutoff10.counts.p',
@@ -226,6 +223,7 @@ rule generate_nucleotide_substitution_plot:
     run:
         generate_tables.generate_nucleotide_substitution_plot(output.plot, input.same_cell)
 
+# generate a table including everything in the raw accuracy count dictionaries
 rule make_accuracy_table:
     params: job_name = 'make_accuracy_table.{report_name}.{cut}'
     input:  counts = 'accuracy_reports/{report_name}/cutoff{cut}.counts.p',
@@ -233,6 +231,7 @@ rule make_accuracy_table:
     run:
         caca.generate_table(input.counts, output.table)
 
+# aggregate the accuracy counts for phased or unphased SISSOR variant calls.
 rule accuracy_aggregate_counts:
     params: job_name = 'accuracy_aggregate_counts.{report_name}.{cut}'
     input: counts = expand('accuracy_reports/{{report_name}}/split/{r}/{{cut}}/counts.p',r=regions),
@@ -240,12 +239,22 @@ rule accuracy_aggregate_counts:
     run:
         caca.accuracy_aggregate(input.counts,output.counts)
 
+# aggregate the separate files that print out the positions with mismatches
+# this is only for inspecting individual SNVs that differ from PGP1 reference,
+# or that have strand-strand MDA-related mismatches, etc.
 rule accuracy_aggregate_mismatches:
     params: job_name = 'accuracy_aggregate_mismatches.{cut}'
     input:  mof = expand('accuracy_reports/{{report_name}}/split/{r}/{{cut}}/mismatches',r=regions),
     output: mof = 'accuracy_reports/{report_name}/cutoff{cut}.mismatches'
     shell:  'cat {input.mof} > {output.mof}'
 
+# generate a dictionary with SNV/reference calls for every 5mb chunk of the genome.
+# we intersect a CGI dataset for PGP1 with a 60x Illumina WGS dataset,
+# to get highly accurate calls for 2.7 Gb Reference positions and 3Mb SNV positions
+# that are shared between PGP1 fibroblast and lymphocyte cell lines.
+
+# we then extract SNVs from a set of PGP1 BAC libraries to use as secondary validation for
+# SNVs not seen in the other datasets.
 rule generate_ref_dict:
     params: job_name = 'generate_ref_dict.{chrom}.{start}.{end}'
     input:  gff = CGI_SNPs1,
@@ -262,37 +271,42 @@ rule generate_ref_dict:
         assert(os.path.isfile(wgs_vcf))
         caca.generate_ref_dict(input.gff, wgs_vcf, input.bac_vcfs, input.hg19, region, output.pickle)
 
+# count numbers for accuracy of unphased, consensus variant calls from SISSORhands.
 rule accuracy_count_unphased:
     params: job_name = 'accuracy_count_unphased.{r}'
     input:  ccf = 'base_calls/unphased/{r}.out',
             ref_dict = 'ref_dicts/{r}.ref_dict.p',
-            gms = 'gms/{r}.gms'
     output: counts_lst = expand('accuracy_reports/unphased/split/{{r}}/{cut}/counts.p',cut=variant_calling_cutoffs),
             mof_lst = expand('accuracy_reports/unphased/split/{{r}}/{cut}/mismatches',cut=variant_calling_cutoffs),
     run:
         for counts, mof, cut in zip(output.counts_lst, output.mof_lst, variant_calling_cutoffs):
-            caca.accuracy_count_unphased(input.ccf, input.ref_dict, input.gms, (1.0-10**(-0.1*float(cut))), counts, mof)
+            caca.accuracy_count_unphased(input.ccf, input.ref_dict, (1.0-10**(-0.1*float(cut))), counts, mof)
 
+# count numbers for the accuracy of SISSOR using same-haplotype strand-matching technique
+# there are 3 primary ways:
+# same cell: get variant calls unique to a single cell
+# all cell: use calls from pairs within OR between cells, to maximize coverage/number of calls
+# cross-cell: compare between strands in different cells only, to gauge error rate of strand pairing approach without it being inflated by cell-specific mutations
 rule accuracy_count_phased:
     params: job_name = 'accuracy_count_{mode,(same_cell|all_cell|cross_cell|ind_same_cell)}.{r}'
     input:  ccf = 'base_calls/phased/{r}.ccf',
             ref_dict = 'ref_dicts/{r}.ref_dict.p',
-            gms = 'gms/{r}.gms'
     output: counts = 'accuracy_reports/{mode,(same_cell|all_cell|cross_cell|ind_same_cell)}/split/{r}/10/counts.p',
             mof = 'accuracy_reports/{mode,(same_cell|all_cell|cross_cell|ind_same_cell)}/split/{r}/10/mismatches',
             smf = 'accuracy_reports/strand_mismatch_{mode,(same_cell|all_cell|cross_cell|ind_same_cell)}/split/{r}/10/counts.p'
     run:
         CUT = 0.9
-        caca.accuracy_count_phased(input.ccf, input.ref_dict, input.gms, CUT, output.counts, output.mof, output.smf,separate_haplotypes=True,mode=wildcards.mode)
+        caca.accuracy_count_phased(input.ccf, input.ref_dict, CUT, output.counts, output.mof, output.smf,separate_haplotypes=True,mode=wildcards.mode)
 
 ###################################################################
-# NEED SET OF REFERENCE AND VARIANT CALLS FROM PGP1F DATASET
+
+# OBTAIN SET OF REFERENCE AND VARIANT CALLS FROM PGP1F DATASET
 # procedure is to call freebayes on short chunks of bam,
 # combine each individual chrom,
 # sort the chromosome separately,
 # then split into short regions again.
-###################################################################
 
+# re-split the lifted over and sorted VCFs into 5Mb chunks corresponding to hg19.
 rule split_freebayes_wgs:
     params: job_name  = 'split_freebayes_wgs_{c}',
     input:  vcf  = 'wgs/lifted_sorted/{c}.vcf'
@@ -302,26 +316,13 @@ rule split_freebayes_wgs:
         chr_chunks = [(chrom,start,end) for (chrom,start,end) in chunklist if chrom == wildcards.c]
         caca.split_vcf(input.vcf, chr_chunks, outfiles)
 
-#rule sort_freebayes_wgs:
-#    params: job_name  = 'sort_freebayes_wgs.{c}',
-#    input:  expand('wgs/lifted/{r}.vcf',r=grch38_regions),
-#    output: 'wgs/lifted_sorted/{c}.vcf'
-#    run:
-#        infiles =  [f for (chrom,start,end),f in zip(grch38_chunklist,input) if chrom == wildcards.c]
-#        shell('''
-#        grep '^#' {infiles[0]} > {output}
-#        cat {infiles} |
-#        grep -v '^#' |
-#        vcf-sort -c -p 4 >> {output}
-#        ''')
-
-
-rule sort_freebayes_wgs_autosomes:
+# combine, and sort, the lifted over VCFs for PGP1f WGS SNV/ref calls for every genomic position
+rule sort_freebayes_wgs:
     params: job_name  = 'sort_freebayes_wgs.{c}',
-    input:  expand('wgs/lifted/{r}.vcf',r=grch38_regions_noXY),
-    output: 'wgs/lifted_sorted/{c,\d+}.vcf'
+    input:  expand('wgs/lifted/{r}.vcf',r=grch38_regions),
+    output: 'wgs/lifted_sorted/{c}.vcf'
     run:
-        infiles =  [f for (chrom,start,end),f in zip(grch38_chunklist_noXY,input) if chrom == 'chr'+wildcards.c]
+        infiles =  [f for (chrom,start,end),f in zip(grch38_chunklist,input) if chrom == wildcards.c]
         shell('''
         grep '^#' {infiles[0]} > {output}
         cat {infiles} |
@@ -329,19 +330,7 @@ rule sort_freebayes_wgs_autosomes:
         vcf-sort -c -p 4 >> {output}
         ''')
 
-rule sort_freebayes_wgs_XY:
-    params: job_name  = 'sort_freebayes_wgs.{c}',
-    input:  expand('wgs/lifted/{r}.vcf',r=grch38_regions_XYonly),
-    output: 'wgs/lifted_sorted/chr{c,X|Y}.vcf'
-    run:
-        infiles =  [f for (chrom,start,end),f in zip(grch38_chunklist_XYonly,input) if chrom == 'chr'+wildcards.c]
-        shell('''
-        grep '^#' {infiles[0]} > {output}
-        cat {infiles} |
-        grep -v '^#' |
-        vcf-sort -c -p 4 >> {output}
-        ''')
-
+# liftover individual VCF files to hg19
 rule liftover_wgs:
     params: job_name  = 'liftover.{r}',
     input:  vcf = 'wgs/freebayes/{r}.vcf',
@@ -357,6 +346,8 @@ rule liftover_wgs:
         {output.vcf}
         '''
 
+# run freebayes to call reference and variants for every genomic position for PGP1f WGS bam file.
+# as with everything else, this is done in 5Mb chunks to allow cluster execution
 rule run_freebayes_wgs:
     params: job_name  = 'freebayes.{chr}.{start}.{stop}',
     input:  bam   = 'wgs/wgs.bam',
@@ -372,6 +363,7 @@ rule run_freebayes_wgs:
          {input.bam} > {output.region_vcf}
         '''
 
+# download grch38 genome
 rule download_grch38:
     params: job_name = 'download_grch38'
     output: fa = GRCH38
@@ -381,6 +373,7 @@ rule download_grch38:
         gunzip {output.fa}.gz
         '''
 
+# download raw bam of 60x Illumina WGS on PGP1f cells
 rule download_WGS_bam:
     params: job_name = 'download_WGS_bam'
     output: bam = 'wgs/wgs.bam'
@@ -388,12 +381,11 @@ rule download_WGS_bam:
         '''
         wget {WGS_BAM_URL} -O {output.bam}
         '''
-
 ###################################################################
 
-
-
-# add phasing information to unphased chamber call files
+# add phasing information (P1 and P2 info tags) to unphased chamber call files
+# this will allow us to traverse the files and pair up calls in different chambers
+# to perform same-haplotype strand-matching.
 rule annotate_assigned_fragments:
     params: job_name = 'annotate_assigned_fragments.{r}'
     input:  ccf = 'base_calls/unphased/{r}.out',
@@ -402,14 +394,14 @@ rule annotate_assigned_fragments:
     run:
         fragment_haplotype_assignment.annotate_assigned_fragments(input.ccf,input.asn,output.ccf)
 
-# combine separate files for assembled fragment haplotypes
+# combine separate files for fragment-to-haplotype assignments
 rule combine_assigned_fragment_files:
     params: job_name = 'combine_assigned_fragment_files'
     input:  sep = expand('fragment_haplotype_assignments/{chrom}',chrom=chroms),  #+['chrXY']
     output: combined = 'fragment_haplotype_assignments/all',
     shell:  'cat {input.sep} > {output.combined}'
 
-# assign fragments to assembled haplotypes
+# assign every SISSOR haplotype fragment back to the assembled haplotype it matches best
 rule assign_fragment_haplotypes:
     params: job_name = 'assign_fragment_haplotypes.chr{chrom,\d+}'
     input: frag = 'haplotyping/data/PGP1_ALL/fragmat/cov1_strict/chr{chrom,\d+}',
@@ -419,20 +411,7 @@ rule assign_fragment_haplotypes:
     run:
         fragment_haplotype_assignment.assign_fragment_haplotypes(input.frag,input.vcf,output.sep,input.hap)
 
-# assign fragments to assembled haplotypes
-#rule assign_fragment_haplotypes_XY:
-#    params: job_name = 'assign_fragment_haplotypes_XY'
-#    input:  bounds = expand('eric_fragment_boundary_beds/{P[0]}/ch{P[1]}.bed',P=product(cells,chambers)),
-#    output: sep = 'fragment_haplotype_assignments/chrXY',
-#    run:
-#        cell_ch_nos = []
-#        for cellno in range(0,3):
-#            for chamberno in range(0,24):
-#                cell_ch_nos.append((cellno,chamberno))
-#
-#        fragment_haplotype_assignment.assign_fragment_haplotypes_XY(input.bounds,cell_ch_nos,output.sep)
-
-# PLOT RESULTS
+# make a bar chart showing the accuracy (switch, mismatch) and completeness (N50, AN50) for SISSOR haplotypes
 rule plot_hapcut2_results:
     params:
         job_name = "plot_hapcut2_sissor"
@@ -446,6 +425,8 @@ rule plot_hapcut2_results:
         labels = pickle.load(open(input.labels_file,"rb"))
         plot_sissor(data,labels,output.plot2)
 
+# calculate switch and mismatch error rates of the assemble SISSOR haplotypes
+# also calculates N50 and AN50, phase rate, etc
 exp =['cov1_none','cov1_strict']
 exp_labels=['Unprocessed Fragments','Processed Fragments']
 rule calculate_error_rates:
@@ -483,8 +464,7 @@ rule calculate_error_rates:
         pickle.dump(data,open(output.stats_file,"wb"))
         pickle.dump(labels,open(output.labels_file,"wb"))
 
-
-# RUN HAPCUT2
+# Prune SNVs from SISSOR haplotypes and split haplotype blocks at possible switch errors, at moderate stringency
 rule prune_haplotype:
     params:
         job_name = "{s}.{x}.prune_haplotype",
@@ -496,7 +476,7 @@ rule prune_haplotype:
         for i, o in zip(input.hapblocks,output.hapblocks):
             fileIO.prune_hapblock_file(i, o, snp_conf_cutoff=0.95, split_conf_cutoff=0.95, use_refhap_heuristic=True) #split_conf_cutoff=0.9999
 
-# RUN HAPCUT2
+# Run HapCUT2 to assemble haplotypes from SISSOR fragments (raw fragments and post-processed fragments to compare completeness and accuracy)
 rule run_hapcut2:
     params:
         job_name = "{s}.{c}.{x}.hapcut",
@@ -510,7 +490,15 @@ rule run_hapcut2:
         {HAPCUT2} --fragments {input.frag_file} --vcf {input.vcf_file} --output {output.hapblocks} --ea 1
         '''
 
-# COMBINE FRAGMENT MATRICES
+# we now have fragment files that are nearly in HapCUT2 format but
+# with one alteration -- they've been augmented with 'M' symbols for "mixed calls"
+# this rule applies the following steps:
+# filter out fragments with many mixed calls
+# split fragments at clusters of mixed calls
+# remove fragments that are highly discordant with the phase of other fragments
+# split fragments at detectable switch errors to other fragments (2 or more SNVs switched with respect to another fragment)
+# if a fragment has the same switch to 2 or more fragments then only that offending fragment is split
+# if it is ambiguous (2 fragments, switched only w.r.t. each other, both are split)
 rule fix_fragmat:
     params:
         job_name  = "fix_fragmat.{x}",
@@ -530,6 +518,7 @@ rule fix_fragmat:
         for i,v,o in zip(input.P_ALL, input.var_vcfs, output.fixed):
             fix_chamber_contamination(i,v,o,threshold=2, min_coverage=0,mode=mode)
 
+# generate a HapCUT2 format fragment file from our SISSORhands "chamber call file" variant calls.
 rule generate_fragmatrix:
     params: job_name = 'generate_fragmatrix'
     input:  ccf      = 'haplotyping/data/PGP1_ALL.het.whole_genome.ccf',
@@ -542,6 +531,8 @@ rule generate_fragmatrix:
         # generate fragment matrix from sissorhands base calls
         create_hapcut_fragment_matrix_CCF(chamber_call_file=input.ccf, variant_vcf_files=input.vcfs,fragment_boundary_files=input.bounds, output_dir=odir)
 
+# combine the filtered "chamber call files" into one file.
+# the calls in this file will be used to generate HapCUT2 fragment matrix files
 rule combine_filtered:
     params: job_name = 'combine_filtered'
     input:  ccf = expand('haplotyping/data/ccf_split/{r}.ccf',r=regions),
@@ -552,6 +543,10 @@ rule combine_filtered:
         '''cat {input.ccf} > {output.ccf}
            cat {input.vcf} > {output.vcf}'''
 
+# we will use per-chamber variant calls from SISSORhands to assemble haplotypes from 3 SISSOR cells.
+# we start by taking the output of SISSORhands and filtering them for only positions in our heterozygous SNV set (from PGP1f Illmina WGS).
+# we do this because the output of SISSORhands is massive and scattered in many files,
+# as it has calls and probability information for every chamber at every genomic position.
 rule filter_CCF:
     params: job_name = 'filter_CCF_{chrom}.{start}.{end}'
     input:  ccf      = 'base_calls/unphased/{chrom}.{start}.{end}.out',
@@ -584,13 +579,10 @@ rule filter_CCF:
                     print(line.strip(),file=ccf_out)
                     print(het_pos[(chrom,pos)],file=vcf_out)
 
-#rule combine_intersect:
-#    params: job_name = "combine_intersect",
-#    input: expand("haplotyping/data/haplotyping_VCFs/{c}.vcf",c=chroms)
-#    output: 'haplotyping/data/haplotyping_VCFs/all.vcf'
-#    shell:
-#        '''cat {input} > {output}'''
-
+# prune the BAC haplotypes and split blocks to remove switch errors,
+# at extremely high stringency.
+# this will be our reference set to gauge SISSOR haplotyping error against so we
+# have a low tolerance for error
 rule prune_BAC:
     params:
         job_name = "BAC.prune_haplotype",
@@ -602,8 +594,7 @@ rule prune_BAC:
         for i, o in zip(input.hapblocks,output.hapblocks):
             fileIO.prune_hapblock_file(i, o, snp_conf_cutoff=0.9999, split_conf_cutoff=0.9999, use_refhap_heuristic=True) #split_conf_cutoff=0.9999
 
-# RUN HAPCUT2
-
+# run HapCUT2 to assemble high-confidence reference BAC haplotype.
 rule run_hapcut2_BAC:
     params:
         job_name = "{c}.BAC.hapcut2",
@@ -617,7 +608,10 @@ rule run_hapcut2_BAC:
         {HAPCUT2} --fragments {input.frag_file} --vcf {input.vcf_file} --output {output.hapblocks} --ea 1
         '''
 
-# REMOVE SWITCH ERRORS FROM BAC FRAGMENTS
+# remove switch errors from BAC fragments.
+# split each fragment at any position with 2 or more SNVs switched with respect to another fragment
+# if a fragment has the same switch to 2 or more fragments then only that offending fragment is split
+# if it is ambiguous (2 fragments, switched only w.r.t. each other, both are split)
 rule fix_fragmat_BAC:
     params:
         job_name  = "fix_fragmat_BAC_{c}",
@@ -630,14 +624,7 @@ rule fix_fragmat_BAC:
     run:
         fix_chamber_contamination(input.frags,input.var_vcfs,output.fixed,threshold=2, min_coverage=0,mode='basic',vcf_filter=input.WGS_variants)
 
-#rule filter_CGI_VCF:
-#    params: job_name  = "filter_CGI_VCF",
-#    input: vcfs = expand("{d}/{c}.vcf",d=BAC_VCF_dir,c=chroms),
-#           filter_set = "/oasis/tscc/scratch/wkchu/SISSOR/NewPGP1REF/PGP-Harvard-var-hu43860C-20160106T060652Z.vcf"
-#    output: vcfs = expand("{d}/{c}.vcf",d=haplotyping_VCF_dir,c=chroms)
-#    run:
-#        filter_vcf.filter_vcf(input.vcfs,output.vcfs,input.filter_set)
-
+# create a combined version of the haplotyping VCF with only heterozygous SNVs
 rule combine_haplotyping_VCFs:
     params: job_name = "combine_haplotyping_VCFs",
     input: expand("haplotyping/data/haplotyping_VCFs/{c}.vcf",c=chroms)
@@ -645,13 +632,17 @@ rule combine_haplotyping_VCFs:
     shell:
         '''cat {input} > {output}'''
 
+# filter the haplotyping VCFs for quality and coverage
+# keep only heterozygous SNVs because that's all we care about
+# return separate VCFs per chromosome
 rule filter_haplotyping_VCFs:
     params: job_name  = "filter_haplotyping_VCF",
     input: vcf = "wgs/wgs_hg19.vcf"
-    output: vcfs = expand("{d}/{c}.vcf",d=haplotyping_VCF_dir,c=chroms)
+    output: vcfs = expand("haplotyping/data/haplotyping_VCFs/{c}.vcf",c=chroms)
     run:
         filter_vcf.filter_wgs_vcf(input.vcf,output.vcfs,chroms) # input.filter_set
 
+# sort the variants that we'll use for phasing.
 rule sort_wgs_SNPs:
     params: job_name  = 'liftover_SNPs',
     input:  vcf = 'wgs/wgs_hg19.autosomesXY.unsorted.vcf',
@@ -659,6 +650,8 @@ rule sort_wgs_SNPs:
     shell:
         '''cat {input} | vcf-sort -c -p 4 > {output}'''
 
+# remove all chromosomes except chr1-chr22,chrX,chrY.
+# this is just to make sorting work properly.
 rule filter_wgs_autosomes:
     params: job_name  = 'filter_wgs_autosomes',
     input:  vcf = 'wgs/wgs_hg19.unsorted.vcf',
@@ -674,6 +667,9 @@ rule filter_wgs_autosomes:
                 if el[0] in chroms_set_XY:
                     print(line.strip(),file=outf)
 
+# our data is aligned to hg19.
+# carry over the 60x PGP1 fibroblast varants to hg19 so we can use them with
+# HapCUT2 to phase.
 rule liftover_wgs_SNPs:
     params: job_name  = 'liftover_SNPs',
     input:  vcf = 'wgs/wgs_grch38.vcf',
@@ -690,6 +686,8 @@ rule liftover_wgs_SNPs:
         {output.vcf}
         '''
 
+# download VCF file with variants from a 60x Illumina WGS experiment on PGP1 fibroblast cells
+# these variants will be used to assemble haplotypes with HapCUT2
 rule download_WGS_vcf:
     params: job_name = 'download_WGS_vcf'
     output: vcf = 'wgs/wgs_grch38.vcf'
@@ -699,22 +697,8 @@ rule download_WGS_vcf:
         mv {output.vcf}.gz {output.vcf}
         '''
 
-rule split_gms:
-    params: job_name  = 'split_gms',
-    input:  gms = expand('gms/{c}.gms',c=chroms_XY)
-    output: gms = expand('gms/{r}.gms',r=regions)
-    run:
-        caca.split_gms(input.gms, chunklist, output.gms)
-
-rule download_GMS:
-    params: job_name = 'download_GMS.{chr}'
-    output: 'gms/{chr}.gms',
-    shell:
-        '''
-        wget http://labshare.cshl.edu/shares/schatzlab/www-data/darkmatter/by_tech/hg19_illumina/{wildcards.chr}.gms.gz -O {output}.gz
-        gunzip {output}.gz
-        '''
-'''
+# run the SISSORhands custom variant caller for SISSOR technology to call variants using
+# cross-chamber information.
 rule call_alleles:
     params: job_name = 'call_alleles.{r}'
     input:  pileup = 'pileups/split/{r}.pileup',
@@ -727,11 +711,12 @@ rule call_alleles:
             haploid_genotype_priors = 'parameters/haploid_genotype_priors.p',
             diploid_genotype_priors = 'parameters/diploid_genotype_priors.p'
     output: ccf = 'base_calls/unphased/{r}.out'
-    shell:  '{PYPY} sissorhands.py -i {input.pileup} -o {output.ccf}'
+    shell:  '{PYPY} sissorhands.py -i {input.pileup} -o {output.ccf}' # this is the slowest step and requires massive parallel compute time. PYPY makes this a little faster for each job.
     #run:
         #import sissorhands
         #sissorhands.call_chamber_alleles(input.pileup, output.ccf)
 
+# conglomerate statistics from the previous rule into the statistics needed for base calling
 rule estimate_parameters:
     params: job_name = 'estimate_parameters'
     input:  expand('parameters/split/chrX_MDA_fracs.{r}.p',r=regions),
@@ -750,11 +735,12 @@ rule estimate_parameters:
             'parameters/het_config_probs.p',
             'parameters/diploid_genotype_priors.p',
             'parameters/haploid_genotype_priors.p',
-            #'parameters/total_sampled_cell_positions.p',
-            #'parameters/omega.p'
     run:
         estimate_parameters.estimate_parameters(regions)
 
+# parse through bam files and count various statistics from the SISSOR libraries
+# for the purpose of estimating things like the probability of strands falling in a chamber,
+# or the distribution of coverage for chromosome X (used for estimation of strand overlap error)
 rule obtain_counts_parallel:
     params: job_name = 'obtain_counts_parallel.{r}'
     input:  pileup = 'pileups/split/{r}.pileup',
@@ -762,10 +748,11 @@ rule obtain_counts_parallel:
             'parameters/split/chrX_covs.{r}.p',
             'parameters/split/chamber_position_counts.{r}.p',
             'parameters/split/strand_coverage_counts.{r}.p',
-            #'parameters/split/total_sampled_cell_positions.{r}.p',
     run:
         estimate_parameters.obtain_counts_parallel(input.pileup, boundary_files=None, suffix=wildcards.r)
 
+# perform a massive multi-pileup of the reads for all 72 SISSOR libraries bam files (3 cells x 24 chambers)
+# pileup in small chunks of 5Mb to allow parallel processing of chunks on the cluster
 rule pileup:
     params: job_name = 'pileup.{r}',
             chrom = lambda wildcards: wildcards.r.split('.')[0],
@@ -776,15 +763,16 @@ rule pileup:
     output: pileup = 'pileups/split/{r}.pileup'
     shell:  '{SAMTOOLS} mpileup --region {params.chrom}:{params.start}-{params.stop} --adjust-MQ 50 --max-depth 100 --output-MQ --min-MQ 30 --min-BQ 20 --fasta-ref {HG19} --output {output.pileup} {input.bams}'
 
+# index bamfile for pileup
 rule index_bam:
     params: job_name = lambda wildcards: 'index_bam.{}'.format(str(wildcards.x).replace("/", "."))
     input:  bam = '{x}.bam'
     output: bai = '{x}.bam.bai'
     shell:  '{SAMTOOLS} index {input.bam} {output.bai}'
 
-# PGP1_22 and PGP1_A1 don't have chr before chromosome labels. necessary for pileup to include reference
+# PGP1_22 and PGP1_A1 bam files don't have chr before chromosome labels. necessary
+# to change the chromosome names for mpileup to include reference call.
 # credit to petervangalen and Pierre Lindenbaum for this rule's code: https://www.biostars.org/p/13462/
-
 rule fix_sam:
     params: job_name = 'fix_sam.{ce}.{ch}'
     input:  sam = 'bams/{ce}/old.ch{ch}.sam'
@@ -792,13 +780,14 @@ rule fix_sam:
     run:
         fix_sam.fix_sam(input.sam,output.bam)
 
+# convert bam file to sam file
 rule bam2sam:
     params: job_name = 'bam2sam.{ce}.{ch}'
     input:  'bams/{ce}/old.ch{ch}.bam'
     output: temp(rules.fix_sam.input)
     shell: '{SAMTOOLS} view -h {input} > {output}'
+
 # simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
-'''
 rule simlinks:
     run:
         for ch,chpad in zip(chambers,chambers_pad):
