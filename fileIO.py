@@ -107,7 +107,11 @@ def parse_runtime_file(runtime_file):
     with open(runtime_file, 'r') as rf:
         return float(rf.readline().strip())
 
+
 def prune_hapblock_file(hapblock_file, output_file, snp_conf_cutoff, split_conf_cutoff, use_refhap_heuristic):
+
+    snp_conf_cutoff = -10*log10(1-snp_conf_cutoff)
+    split_conf_cutoff = -10*log10(1-split_conf_cutoff)
 
     with open(hapblock_file,'r') as inf, open(output_file,'w') as of:
         blk_count = 0
@@ -120,8 +124,8 @@ def prune_hapblock_file(hapblock_file, output_file, snp_conf_cutoff, split_conf_
 
             el = line.strip().split()
             pruned_refhap_heuristic = int(el[8])
-            split_conf = 10**float(el[9])
-            snp_conf   = 10**float(el[10])
+            split_conf = float(el[9]) if el[9] != '.' else 100
+            snp_conf   = float(el[10]) if el[10] != '.' else 100
 
             if split_conf < split_conf_cutoff and blk_count >= 2:
                 print('******** ',file=of)
@@ -136,42 +140,10 @@ def prune_hapblock_file(hapblock_file, output_file, snp_conf_cutoff, split_conf_
 
             blk_count += 1
 
+
 # convert the new fragment file format to the old format
 # assumes normal fragments (no special modeling)
 
-def prune_probhap_file(hapblock_file, output_file, emission_cutoff, split_cutoff):
-
-    with open(hapblock_file,'r') as inf, open(output_file,'w') as of:
-        blk_count = 0
-        had_posterior_split = False
-        for line in inf:
-            if 'BLOCK' in line:
-                blk_count = 0
-                had_posterior_split = False
-            if len(line) < 3 or 'BLOCK' in line or '****' in line:
-                print(line,file=of,end='')
-                continue
-
-            el = line.strip().split()
-            transition_prob = float(el[3])
-            posterior_prob  = float(el[4])
-            emission_prob   = float(el[5])
-
-            if (((transition_prob < split_cutoff) or
-                (posterior_prob < split_cutoff and not had_posterior_split))
-                and blk_count >= 2):
-                had_posterior_split = True
-                print('******** ',file=of)
-                print('BLOCK: (from split)',file=of)
-
-            if emission_prob < emission_cutoff:
-                el[1] = '-'
-                el[2] = '-'
-                print('\t'.join(el),file=of)
-            else:
-                print(line,file=of,end='')
-
-            blk_count += 1
 
 def new_to_old_format(inputfile,outputfile):
 
