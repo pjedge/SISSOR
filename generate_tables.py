@@ -1,4 +1,9 @@
 import pickle
+import sys
+from collections import defaultdict
+import matplotlib as mpl
+from matplotlib import pyplot as plt
+import numpy as np
 
 def generate_phased_calls_table(output_file, same_cell_counts, all_cell_counts, cross_cell_counts, ind_same_cell_counts):
 
@@ -25,8 +30,8 @@ def generate_phased_calls_table(output_file, same_cell_counts, all_cell_counts, 
         line3.append(num_snp)
 
         CGI = sum([x[1] for x in counts.items() if x[0].matches_CGI == 0])
-        CGI_WGS_BAC = sum([x[1] for x in counts.items() if x[0].matches_CGI == 0 and not x[0].matches_BAC == 1])
-        CGI_WGS_BAC_THIRDCH = sum([x[1] for x in counts.items() if x[0].matches_CGI == 0 and not x[0].matches_BAC == 1 and not x[0].matches_third_chamber])
+        CGI_BAC = sum([x[1] for x in counts.items() if x[0].matches_CGI == 0 and not x[0].matches_BAC == 1])
+        CGI_BAC_THIRDCH = sum([x[1] for x in counts.items() if x[0].matches_CGI == 0 and not x[0].matches_BAC == 1 and not x[0].matches_third_chamber])
 
         line4.append(CGI)
         line5.append(CGI_BAC)
@@ -76,26 +81,126 @@ def generate_unphased_calls_table(output_file, count_files, cutoffs):
     lines[6].append('Matching SNVs')
     lines[7].append('FDR')
 
-    for f in count_files:
+    assert(len(count_files) == len(cutoffs))
+
+    for f,cut in zip(count_files,cutoffs):
         counts = pickle.load(open(f,'rb'))
         countlst.append(counts)
         lines[0].append(cut)
         lines[1].append(sum([x[1] for x in counts.items()]))
-        have_truth = sum([x[1] for x in counts.items() if x[0].matches_CGI != None])
+        have_truth = sum([x[1] for x in counts.items() if x[0].matches_ref != None])
         lines[2].append(have_truth)
-        mismatch = sum([x[1] for x in counts.items() if x[0].matches_CGI == False])
-        snv_mismatch = sum([x[1] for x in counts.items() if x[0].matches_CGI == False and x[0].is_SNP])
+        mismatch = sum([x[1] for x in counts.items() if x[0].matches_ref == False])
+        snv_mismatch = sum([x[1] for x in counts.items() if x[0].matches_ref == False and x[0].is_SNP])
 
         lines[3].append(mismatch)
 
-        true_negatives = sum([x[1] for x in counts.items() if x[0].matches_CGI == True and x[0].CGI_genotype == '0/0'])
+        true_negatives = sum([x[1] for x in counts.items() if x[0].matches_ref == True and x[0].ref_genotype == '0/0'])
 
         lines[4].append(snv_mismatch/(snv_mismatch + true_negatives))
         lines[5].append(mismatch/have_truth)
-        snv_match =sum([x[1] for x in counts.items() if x[0].matches_CGI and x[0].is_SNP])
+        snv_match =sum([x[1] for x in counts.items() if x[0].matches_ref and x[0].is_SNP])
         lines[6].append(snv_match)
         lines[7].append(mismatch / (snv_match + mismatch))
 
     with open(output_file,'w') as table:
         for line in lines:
             print('\t'.join([str(x) for x in line]),file=table)
+
+def generate_strand_strand_mismatch_table(output_file, same_cell_counts, all_cell_counts, cross_cell_counts):
+
+    lines = [[] for i in range(4)]
+    lines[0].append('')
+    lines[1].append('total strand-strand mismatch')
+    lines[2].append('total strand-strand match')
+    lines[3].append('mismatch rate')
+
+    for mode,f in [('same_cell',same_cell_counts),('all_cell',all_cell_counts),('cross_cell',cross_cell_counts)]:
+
+        counts = pickle.load(open(f,'rb'))
+
+        mismatch = sum([x[1] for x in counts.items() if x[0][1] == 'mismatch'])
+        match = sum([x[1] for x in counts.items() if x[0][1] == 'match'])
+        mismatch_rate = mismatch / (mismatch + match)
+
+        lines[0].append(mode)
+        lines[1].append(mismatch)
+        lines[2].append(match)
+        lines[3].append(mismatch_rate)
+
+    with open(output_file,'w') as table:
+        for line in lines:
+            print('\t'.join([str(x) for x in line]),file=table)
+
+def generate_nucleotide_substitution_plot(output_file,input_file):
+
+    counts = pickle.load(open(input_file,'rb'))
+
+    sub_dict = defaultdict(int)
+    total_sub = 0
+    for k,v in counts.items():
+        if k[3] != k[4]:
+            sub_dict[(k[3],k[4])] += v
+            total_sub += v
+
+    sub_list = sorted(list(sub_dict.items()),key=lambda x: x[1])
+
+    ts = 0
+    tv = 0
+
+    x_val = []
+    y_val = []
+
+    for k,v in sub_list:
+        print("{}\t{}\t{}".format(k[0],k[1],v))
+        if {k[0],k[1]} <= {'A','G'} or  {k[0],k[1]} <= {'C','T'}:
+            ts += v
+        else:
+            tv += v
+
+        x_val.append("{} -> {}".format(k[0],k[1]))
+        y_val.append(v)
+
+    mpl.rc('legend', fontsize=11)
+    mpl.rc('xtick', labelsize=11)
+    mpl.rc('ytick', labelsize=11)
+    mpl.rc('axes', labelsize=11)
+    mpl.rc('axes', labelsize=11)
+    mpl.rcParams.update({'font.size': 11})
+    mpl.rc('lines', linewidth=1.5)
+    mpl.rc('mathtext',default='regular')
+
+    alpha1 = 0.8
+    alpha2 = 0.5
+    width = 0.75
+
+
+    ind = np.array(list(range(0,12)))
+    ax = plt.subplot(111)
+    plt.bar(ind, y_val, color='c',
+            ecolor='black',
+            alpha=alpha1,
+            width=width,
+            align='center',
+            label='subs')
+
+        # add some text for labels, title and axes ticks
+    ax.set_ylabel('Mismatch Counts')
+    ax.set_xticks(ind)
+    ax.set_xticklabels(tuple(x_val))
+    ax.set_xticklabels(ax.xaxis.get_majorticklabels(), rotation=90)
+
+    ax.yaxis.grid(True,color='grey')
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["bottom"].set_visible(False)
+    ax.spines["left"].set_visible(False)
+    plt.tick_params(axis="both", which="both", bottom="off", top="off",
+                labelbottom="on", left="off", right="off", labelleft="on")
+    #plt.legend(loc='upper left')
+    plt.xlim(-1,12)
+    plt.savefig(output_file)
+
+    print("G->T rate: {}".format(sub_dict[('G','T')]/total_sub))
+    print("G<->T rate: {}".format((sub_dict[('G','T')]+sub_dict[('T','G')])/total_sub))
+    print("Ts/Tv: {}".format(ts/tv))

@@ -176,20 +176,22 @@ modes = ['same_cell','all_cell','cross_cell','ind_same_cell']
 #modes = ['cross_cell']
 rule all:
     input:
-        expand('accuracy_reports/{mode}/cutoff10.counts.p',mode=modes),
-        expand('accuracy_reports/{mode}/cutoff10.mismatches',mode=modes),
-        expand('accuracy_reports/tables/strand_mismatch_{mode}.10.table.txt',mode=modes),
-        'accuracy_reports/tables/unphased.10.table.txt',
         'accuracy_reports/tables/unphased_call_accuracy_master_table.txt',
-        'accuracy_reports/tables/phased_call_accuracy_master_table.txt'
+        'accuracy_reports/tables/phased_call_accuracy_master_table.txt',
+        'accuracy_reports/tables/strand_strand_mismatch_rates_table.txt',
+        'accuracy_reports/tables/strand_strand_nucleotide_substitutions.png',
 
-
+        #expand('accuracy_reports/{mode}/cutoff10.counts.p',mode=modes),
+        #expand('accuracy_reports/{mode}/cutoff10.mismatches',mode=modes),
+        #expand('accuracy_reports/tables/strand_mismatch_{mode}.10.table.txt',mode=modes),
         #expand('wgs/lifted/{r}.vcf',r=grch38_regions),
         #expand('ref_dicts/{r}.ref_dict.p',r=regions),
         #expand('accuracy_reports/unphased/cutoff{cut}.counts.p',cut=variant_calling_cutoffs),
         #"{}/sissor_haplotype_error_genome.png".format(HAPLOTYPE_PLOTS_DIR),
         #
         #expand('accuracy_reports/tables/{mode}.10.table.txt',mode=modes),
+
+
 
 rule make_phased_accuracy_master_table:
     params: job_name = 'make_phased_accuracy_master_table'
@@ -204,9 +206,25 @@ rule make_phased_accuracy_master_table:
 rule make_unphased_accuracy_master_table:
     params: job_name = 'make_unphased_accuracy_master_table'
     input:  counts_files = expand('accuracy_reports/unphased/cutoff{c}.counts.p',c=variant_calling_cutoffs)
-    output: table = 'accuracy_reports/tables/phased_call_accuracy_master_table.txt'
+    output: table = 'accuracy_reports/tables/unphased_call_accuracy_master_table.txt'
     run:
         generate_tables.generate_unphased_calls_table(output.table, input.counts_files, variant_calling_cutoffs)
+
+rule make_strand_strand_mismatch_table:
+    params: job_name = 'make_strand_strand_mismatch_table'
+    input:  same_cell = 'accuracy_reports/strand_mismatch_same_cell/cutoff10.counts.p',
+            all_cell = 'accuracy_reports/strand_mismatch_all_cell/cutoff10.counts.p',
+            cross_cell = 'accuracy_reports/strand_mismatch_cross_cell/cutoff10.counts.p'
+    output: table = 'accuracy_reports/tables/strand_strand_mismatch_rates_table.txt',
+    run:
+        generate_tables.generate_strand_strand_mismatch_table(output.table, input.same_cell, input.all_cell, input.cross_cell)
+
+rule generate_nucleotide_substitution_plot:
+    params: job_name = 'generate_nucleotide_substitution_plot'
+    input:  same_cell = 'accuracy_reports/strand_mismatch_same_cell/cutoff10.counts.p',
+    output: plot = 'accuracy_reports/tables/strand_strand_nucleotide_substitutions.png',
+    run:
+        generate_tables.generate_nucleotide_substitution_plot(output.plot, input.same_cell)
 
 rule make_accuracy_table:
     params: job_name = 'make_accuracy_table.{report_name}.{cut}'
@@ -610,7 +628,7 @@ rule fix_fragmat_BAC:
     output:
         fixed = "haplotyping/data/BAC_frags_fixed/{c}"
     run:
-        fix_chamber_contamination(input.frags,input.var_vcfs,output.fixed,threshold=2, min_coverage=0,mode='basic',vcf_filter=None) #input.WGS_variants)
+        fix_chamber_contamination(input.frags,input.var_vcfs,output.fixed,threshold=2, min_coverage=0,mode='basic',vcf_filter=input.WGS_variants)
 
 #rule filter_CGI_VCF:
 #    params: job_name  = "filter_CGI_VCF",

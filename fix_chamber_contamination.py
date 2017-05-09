@@ -434,12 +434,12 @@ def add_new_boundaries(flist):
         orig_start, orig_end = [int(x) for x in bounds_str.split('-')]
 
         if flist[i].first_piece:
-            start = orig_start
+            start = orig_start + 1
         else:
             start = flist[i].seq[0][1]+1
 
         if flist[i].last_piece:
-            end = orig_end
+            end = orig_end + 1
         else:
             end = flist[i].seq[-1][1]+1
 
