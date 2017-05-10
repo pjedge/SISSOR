@@ -13,7 +13,7 @@ This repository contains the majority of the codebase for analysis of SISSOR lib
 It is important to note that the code is here for documentation purposes and has relatively little applicability except with data from the SISSOR device. Various components may be adapted in the future for general haplotype assembly or MDA-based protocols.
 
 The general workflow, executed by the rules in the Snakefile, is the following:
-1. Generate a high-quality BAC reference haplotype from raw BAC reads for PGP1.
+1. Generate a high-quality BAC reference haplotype from BAC haplotype fragments for PGP1.
 2. Generate a high-quality reference dataset of SNV and reference calls for PGP1 by intersecting high-quality SNV/ref datasets from two cell lines (lymphocyte complete genomics, and fibroblast 60x Illumina WGS).
 3. Perform a samtools mpileup of 72 SISSOR libraries from PGP1f cells (3 cells x 24 reaction chambers).
 4. Estimate various model parameters from the mpileup data.
