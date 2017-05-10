@@ -29,7 +29,7 @@ The general workflow, executed by the rules in the Snakefile, is the following:
         1. in the same cell (to get validated cell specific mutations)
         2. in all cells (to get maximum coverage of haplotype-validated calls)
         3. between different cells (cross-cell) (to estimate maximum bound on error rate of the haplotype-strand-matching method against a reference without inflation from cell-specific mutations)
-    
+
 For more details, see the SISSOR manuscript (above) and supplementary materials.
 
 ## Requirements
@@ -37,6 +37,7 @@ For more details, see the SISSOR manuscript (above) and supplementary materials.
 * BAM files for 3 SISSOR libraries, placed in bams/{cells}/ch{ch}.bam
      * {cells} should be named PGP1_21, PGP1_22, PGP1_A1
      * {ch} should be in the range 1-24
+* hg38ToHg19 chainfile (hg38ToHg19.over.chain)
 * samtools
 * BCFtools
 * Picard

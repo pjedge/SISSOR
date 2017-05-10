@@ -6,7 +6,6 @@ Created on Thu May 19 21:44:48 2016
 """
 import sys
 import fragment
-import fileIO
 from collections import defaultdict
 from itertools import combinations
 from chamber_allele_call_accuracy import parse_bedfile

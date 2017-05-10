@@ -5,7 +5,6 @@ Created on Thu May 19 21:44:48 2016
 @author: peter
 """
 
-import fileIO
 import fragment
 import argparse
 import sys
@@ -566,8 +565,8 @@ def fix_chamber_contamination(fragmentfile, vcf_file, outfile, threshold=2, min_
 
     # VCF FILE AND VCF_FILTER MUST CONTAIN ONLY ONE CHROMOSOME EACH OR THIS WILL DO BAD THINGS
     if vcf_filter != None:
-        chrom1 = fileIO.get_ref_name(vcf_file)
-        chrom2 = fileIO.get_ref_name(vcf_filter)
+        chrom1 = get_ref_name(vcf_file)
+        chrom2 = get_ref_name(vcf_filter)
         assert (chrom1 == chrom2)
 
         flist = filter_on_VCF(flist, vcf_filter)

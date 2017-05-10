@@ -7,9 +7,7 @@ Created on Sat Jul  9 16:35:02 2016
 """
 
 import sys
-import fileIO
 import pickle
-
 
 # a class representing a HapCUT2 format haplotype fragment
 # this is mostly agnostic to the SISSOR method, except for two special fields: first_piece and last_piece

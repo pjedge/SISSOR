@@ -4,22 +4,17 @@ import random
 import estimate_parameters
 import fix_sam
 import chamber_allele_call_accuracy as caca
-import base_calls_to_vcf
 import fragment_haplotype_assignment
 from itertools import product
-#sys.path.append('/home/pedge/git/HapTools')
 from file_processing import prune_hapblock_file, filter_wgs_vcf, split_vcf
 from plot_sissor import plot_sissor
 from create_hapcut_fragment_matrix import create_hapcut_fragment_matrix
 from fix_chamber_contamination import fix_chamber_contamination
 import generate_tables
-#import run_tools
 import fragment
-import fileIO
 import os
-
-import filter_vcf
 import calculate_haplotype_statistics as chs
+
 localrules: all, simlinks, pileup_test, make_accuracy_table
 
 
@@ -31,6 +26,7 @@ HAPCUT2  = '/path/to/HAPCUT2' #'/home/pedge/git/hapcut2/build/HAPCUT2'
 PYPY     = '/path/to/pypy3.3' #'/home/pedge/installed/pypy3.3-5.5-alpha-20161013-linux_x86_64-portable/bin/pypy3.3'
 WGS_VCF_URL = 'https://www.encodeproject.org/files/ENCFF995BBX/@@download/ENCFF995BBX.vcf.gz'
 HG19     = '/path/to/hg19.fa' #'/oasis/tscc/scratch/pedge/data/genomes/hg19/hg19.fa' #'/home/wkchu/zhang_lab_oasis/resources_v2.8_b37/human_g1k_v37_decoy.fasta'
+hg38ToHg19_chainfile = '/path/to/hg38ToHg19.over.chain'
 CGI_SNPs1 = '/path/to/CGI_reference.gff' # Complete Genomics reference dataset for PGP1 in GFF format #'/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/BAM/ns.gff'
 WGS_BAM_URL = 'https://www.encodeproject.org/files/ENCFF713HUF/@@download/ENCFF713HUF.bam' # URL for 60x WGS of PGP1f cells from ENCODE
 GRCH38   = '/path/to/grch38.fa' #'/oasis/tscc/scratch/pedge/data/genomes/grch38/grch38.fa'
@@ -334,7 +330,7 @@ rule sort_freebayes_wgs:
 rule liftover_wgs:
     params: job_name  = 'liftover.{r}',
     input:  vcf = 'wgs/freebayes/{r}.vcf',
-            chain = 'hg38ToHg19.over.chain'
+            chain = hg38ToHg19_chainfile
     output: vcf = 'wgs/lifted/{r}.vcf',
     shell:
         '''
@@ -673,7 +669,7 @@ rule filter_wgs_autosomes:
 rule liftover_wgs_SNPs:
     params: job_name  = 'liftover_SNPs',
     input:  vcf = 'wgs/wgs_grch38.vcf',
-            chain = 'hg38ToHg19.over.chain',
+            chain = hg38ToHg19_chainfile,
             hg19 = HG19
     output: vcf = 'wgs/wgs_hg19.unsorted.vcf',
     shell:
