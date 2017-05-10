@@ -25,6 +25,40 @@ chr_num = dict()
 for i,chrom in enumerate(chroms):
     chr_num[chrom] = i
 
+# parse a haplotype block file from HapCUT2 and return a list of blocks.
+# each block is a list of
+def parse_hapblock_file(hapblock_file,use_SNP_index=True):
+
+    blocklist = [] # data will be a list of blocks, each with a list tying SNP indexes to haplotypes
+
+    try:
+        with open(hapblock_file, 'r') as hbf:
+
+            for line in hbf:
+                if len(line) < 3: # empty line
+                    continue
+                if 'BLOCK' in line:
+                    blocklist.append([])
+                    continue
+
+                elements = line.strip().split('\t')
+                if len(elements) < 3: # not enough elements to have a haplotype
+                    continue
+
+                pos = int(elements[4])-1 if not use_SNP_index else int(elements[0])-1
+                allele1 = elements[1]
+                allele2 = elements[2]
+
+                blocklist[-1].append((pos, allele1, allele2))
+
+    except FileNotFoundError:
+        # most of the time, this should mean that the program timed out and therefore didn't produce a phase.
+        print("File {} was missing. Error calculation will continue without it.".format(hapblock_file), file=sys.stderr)
+        pass
+
+    return blocklist
+
+# assign a single fragment object to a haplotype, given a haplotype dictionary containing phase
 def assign_fragment(f, haplotype_dict):
 
     match = 0
@@ -57,12 +91,15 @@ def assign_fragment(f, haplotype_dict):
 
 cell_map = {'PGP1_21':0,'PGP1_22':1,'PGP1_A1':2}
 
+
+# assign fragments in a fragment block file (processed SISSOR fragments) to P1 or P2 haplotype
+# print out the chromosome and boundaries of the fragment, the cell and chamber in which it appears, and the P1/P2 assignment.
 def assign_fragment_haplotypes(fragmentfile, vcf_file, outputfile, haplotype_file):
 
     flist = fragment.read_fragment_matrix(fragmentfile, vcf_file)
 
     assigned_fragments = []
-    t_blocklist = fileIO.parse_hapblock_file(haplotype_file,use_SNP_index=False)
+    t_blocklist = parse_hapblock_file(haplotype_file,use_SNP_index=False)
 
     for t_block in t_blocklist:
 
@@ -99,18 +136,11 @@ def assign_fragment_haplotypes(fragmentfile, vcf_file, outputfile, haplotype_fil
         for (chrom, start, end, cell, chamber, parent) in assigned_fragments:
             print('{}\t{}\t{}\t{}\t{}\t{}'.format(chrom, start+1, end+1, cell, chamber, parent), file=opf)
 
-def assign_fragment_haplotypes_XY(bounds, cell_ch_nos, outfile):
-    chrXY_bounds = []
-    for bounds_file, (cell, ch) in zip(bounds,cell_ch_nos):
-        bounds = parse_bedfile(bounds_file)
-        for chrom,start,end in bounds:
-            if chrom in ['chrX','chrY','X','Y']:
-                chrXY_bounds.append((chrom,int(start),int(end),cell,ch))
 
-    with open(outfile,'w') as outf:
-        for chrom,start,end,cell,ch in sorted(chrXY_bounds):
-            print("{}\t{}\t{}\t{}\t{}\tP1".format(chrom,start,end-1,cell,ch),file=outf)
-
+# edit the "chamber call files" which have have allele probabilities for each chamber,
+# with tags "P1" and "P2" that list which cells and chambers have strands assigned to P1 haplotype
+# or P2 haplotype at that position.
+# this information will be used in later steps to compare variant calls between haplotype-matched strands
 def annotate_assigned_fragments(chamber_call_file, fragment_assignment_file, output_file):
 
     # read in file with spans of assigned strands with matching haplotypes
@@ -173,6 +203,7 @@ def annotate_assigned_fragments(chamber_call_file, fragment_assignment_file, out
             new_line = '\t'.join(ccf_line)
             print(new_line, file=opf)
 
+# counts the total length of fragments that cannot be assigned to haplotypes
 def count_not_matchable(fragmentfile, vcf_file, haplotype_file):
 
     flist = fragment.read_fragment_matrix(fragmentfile, vcf_file)
@@ -180,7 +211,7 @@ def count_not_matchable(fragmentfile, vcf_file, haplotype_file):
     haplotype_dict = None
     if haplotype_file != None:
         haplotype_dict = defaultdict(lambda: '-')
-        t_blocklist = fileIO.parse_hapblock_file(haplotype_file,use_SNP_index=False)
+        t_blocklist = parse_hapblock_file(haplotype_file,use_SNP_index=False)
         for t_block in t_blocklist:
             for i, a1, a2 in t_block:
                 haplotype_dict[i] = a1 # index by genomic pos (1-indexed), return one haplotype

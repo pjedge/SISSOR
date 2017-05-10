@@ -17,7 +17,8 @@ from collections import defaultdict
 import random
 import bisect
 import math
-import common
+from file_processing import parse_bedfile, parse_mpileup_base_qual
+
 if False:
     set_trace() # to dodge warnings that pdb isn't being used.
 
@@ -55,24 +56,6 @@ def addlogs(a,b):
     else:
         return b + log10(1 + pow(10, a - b))
 
-def parse_bedfile(input_file):
-
-    boundaries = []
-    with open(input_file,'r') as inf:
-        for line in inf:
-
-            if len(line) < 3:
-                continue
-
-            el = line.strip().split('\t')
-
-            chrom = el[0]
-            start = int(el[1])
-            stop  = int(el[2])
-
-            boundaries.append((chrom, start, stop))
-
-    return boundaries
 
 # product of list
 def prod(iterable): # credit to: http://stackoverflow.com/questions/7948291/is-there-a-built-in-product-in-python
@@ -96,6 +79,8 @@ def weighted_choice_bisect_compile(items):
 # MAIN FUNCTIONS AND PARSING
 ###############################################################################
 
+# conglomerate counts from the parallel counting function
+# to create estimates for various parameters to the SISSORhands variant calling model
 def estimate_parameters(suffixes):
 
     chrX_MDA_fracs = dict()#defaultdict(lambda: )
@@ -373,8 +358,8 @@ def estimate_parameters(suffixes):
     pickle.dump(het_config_probs, open("parameters/het_config_probs.p","wb"))
     pickle.dump(diploid_genotype_priors, open("parameters/diploid_genotype_priors.p","wb"))
     pickle.dump(haploid_genotype_priors, open("parameters/haploid_genotype_priors.p","wb"))
-    #pickle.dump(omega, open("parameters/omega.p","wb"))
 
+# obtain counts for various features from the data for the purpose of estimating model parameters
 def obtain_counts_parallel(input_file, boundary_files=None, suffix=''):
 
     coverage_cut = 2
@@ -449,7 +434,7 @@ def obtain_counts_parallel(input_file, boundary_files=None, suffix=''):
                         raw_bd = el[col_ix + 1]
                         raw_qd = el[col_ix + 2]
 
-                        bd, qd, ic = common.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+                        bd, qd, ic = parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
                         bd = bd[:max_cov]
                         qd = qd[:max_cov]
 

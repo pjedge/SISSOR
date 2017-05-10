@@ -9,6 +9,8 @@ import sys
 import pysam
 import copy
 
+# the original bam files for PGP1_22 and PGP_A1 SISSOR libraries are missing 'chr' on the contig names
+# we need to add these in manually or it'll mess up the mpileup of those libraries with PGP1_21
 def fix_sam(insam, outbam):
 
 

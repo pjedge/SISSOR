@@ -5,6 +5,9 @@ import matplotlib as mpl
 from matplotlib import pyplot as plt
 import numpy as np
 
+# these functions read in dictionaries countaining error counts from comparing SISSOR data to a reference
+# it prints them to plaintext tables
+
 def generate_phased_calls_table(output_file, same_cell_counts, all_cell_counts, cross_cell_counts, ind_same_cell_counts):
 
     line0 = ['']
@@ -132,6 +135,7 @@ def generate_strand_strand_mismatch_table(output_file, same_cell_counts, all_cel
         for line in lines:
             print('\t'.join([str(x) for x in line]),file=table)
 
+# make a plot showing the rate of nucleotide substitutions for SISSOR data.
 def generate_nucleotide_substitution_plot(output_file,input_file):
 
     counts = pickle.load(open(input_file,'rb'))

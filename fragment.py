@@ -10,6 +10,12 @@ import sys
 import fileIO
 import pickle
 
+
+# a class representing a HapCUT2 format haplotype fragment
+# this is mostly agnostic to the SISSOR method, except for two special fields: first_piece and last_piece
+# these are present so when we are done processing SISSOR fragments to remove contamination and detectable switch errors,
+# we can extend the ends of the fragments to the original boundaries rather than the endpieces being truncated
+# at the first and last heterozygous SNV from our SNV set used for phasing.
 class fragment:
 
     def __init__(self, seq, name, first_piece = True, last_piece = True):
@@ -42,6 +48,7 @@ class fragment:
         fragstr = prefix + fragstr
         return fragstr
 
+# read in a HapCUT2 format fragment file into a list of fragment objects
 def read_fragment_matrix(frag_matrix, vcf_file):
 
     snp_ix = 0
@@ -93,6 +100,7 @@ def read_fragment_matrix(frag_matrix, vcf_file):
 
     return sorted_flist
 
+# print out a list of fragment objects to a HapCUT2 format fragment file
 def write_fragment_matrix(flist,outfile):
     lines = []
 
@@ -108,6 +116,8 @@ def write_fragment_matrix(flist,outfile):
         for firstpos, line in lines:
             print(line, file=opf)
 
+# a visualization function -- visualize fragments in full-blown aligned matrix format.
+# very space inefficient but useful for analyzing toy examples and specific aligned haplotype fragment cases.
 def matrixify_flist(flist, o=None):
 
     max_ix = 0
@@ -148,6 +158,7 @@ def matrixify_flist(flist, o=None):
 
             print(pline)
 
+# determine if two fragments overlap
 def overlap(f1, f2, amt=1):
 
     s1 = set([a[0] for a in f1.seq])

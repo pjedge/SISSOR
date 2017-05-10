@@ -12,6 +12,7 @@ import itertools
 from collections import defaultdict, namedtuple
 import random
 from itertools import combinations
+from file_processing import parse_bedfile
 
 count_key = namedtuple('count_key', 'is_SNP matches_ref ref_genotype')
 count_key_sp = namedtuple('count_key_sp', 'cell is_SNP matches_CGI matches_BAC matches_third_chamber')
@@ -28,60 +29,6 @@ for i,chrom in enumerate(chroms):
     chr_num[chrom] = i
 
 ref_allele_re = re.compile('ref_allele ([ACGT])')
-
-
-def split_vcf(input_vcf, chunklist, output_vcfs):
-
-    regions_output = list(zip(chunklist, output_vcfs))
-    (chrom, start, stop), outputfile = regions_output.pop(0)
-    output = open(outputfile, 'w')
-    with open(input_vcf,'r') as vcf:
-        for line in vcf:
-            if line[0] == '#' or len(line) < 3:
-                continue
-
-            vcf_line = line.strip().split('\t')
-
-            vcf_chrom = vcf_line[0]
-            vcf_pos = int(vcf_line[1])
-
-            if vcf_chrom != chrom or vcf_pos > stop:
-
-                done = False
-                while not (vcf_chrom == chrom and vcf_pos >= start and vcf_pos <= stop):
-                    output.close()
-                    if len(regions_output) == 0:
-                        done = True
-                        break
-                    (chrom, start, stop), outputfile = regions_output.pop(0)
-                    output = open(outputfile, 'w')
-                if done:
-                    break
-
-            # write to lifted over vcf
-            print(line,end='',file=output)
-
-    if not output.closed:
-        output.close()
-
-def parse_bedfile(input_file):
-
-    boundaries = []
-    with open(input_file,'r') as inf:
-        for line in inf:
-
-            if len(line) < 3:
-                continue
-
-            el = line.strip().split('\t')
-
-            chrom = el[0]
-            start = int(el[1])
-            stop  = int(el[2])
-
-            boundaries.append((chrom, start, stop))
-
-    return boundaries
 
 def generate_ref_dict(GFF_file, WGS_VCF_file, BAC_VCF_files, HG19, region, ref_dict_pickle):
 
@@ -266,10 +213,9 @@ def generate_ref_dict(GFF_file, WGS_VCF_file, BAC_VCF_files, HG19, region, ref_d
     pickle.dump(ref_dict,open(ref_dict_pickle,'wb'))
 
 # chamber call file has results from SISSOR cross-chamber allele calls
-# GFF file has set of known alleles for individual (for comparison)
-# VCF file has another set of heterozygous SNVs for individual
-# cutoff is the minimum probability of an allele call to use it
-# result outfile simply contains the counts of match vs mismatched alleles
+# ref_dict_pickle contains the reference dictionary of high-confidence SNVs to compare against
+# cutoff is the phred-scaled max probability of error for an allele call to use it
+# counts_pickle_file is a pickle file where a dictionary with the resulting counts will be written
 # mismatch_outfile prints locations of mismatched allele calls
 def accuracy_count_unphased(chamber_call_file, ref_dict_pickle, cutoff, counts_pickle_file, mismatch_outfile, bedfile_filter=None): #WGS_VCF_file,
 
@@ -383,12 +329,16 @@ def accuracy_count_unphased(chamber_call_file, ref_dict_pickle, cutoff, counts_p
     pickle.dump(counts,open(counts_pickle_file,'wb'))
 
 # chamber call file has results from SISSOR cross-chamber allele calls
-# GFF file has set of known alleles for individual (for comparison)
-# VCF file has another set of heterozygous SNVs for individual
-# cutoff is the minimum probability of an allele call to use it
-# result outfile simply contains the counts of match vs mismatched alleles
+# ref_dict_pickle contains the reference dictionary of high-confidence SNVs to compare against
+# cutoff is the phred-scaled max probability of error for an allele call to use it
+# counts_pickle_file is a pickle file where a dictionary with the resulting counts will be written
 # mismatch_outfile prints locations of mismatched allele calls
-def accuracy_count_phased(chamber_call_file, ref_dict_pickle, cutoff, counts_pickle_file, mismatch_outfile, strand_mismatch_pickle, separate_haplotypes = True, mode='all_cell',no_adjacent_chambers=True): #WGS_VCF_file,
+# strand_mismatch_pickle is another pickle file that will store statistics for strand-strand mismatches (MDA error)
+# separate_haplotypes determines whether to quantify a single allele per genomic position, or up to 2 (unique haploid positions)
+# mode lets you compare strands in the same cell, all cells, or only cross cells
+# ind_same_cell performs same-cell analysis but quantifying each cell independently rather than up to 2 haploid positions between all 3 cells
+
+def accuracy_count_phased(chamber_call_file, ref_dict_pickle, cutoff, counts_pickle_file, mismatch_outfile, strand_mismatch_pickle, separate_haplotypes = True, mode='all_cell',no_adjacent_chambers=True):
 
     if mode not in ['same_cell','all_cell','cross_cell','ind_same_cell']:
         raise ValueError('Invalid accuracy count mode.')

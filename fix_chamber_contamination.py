@@ -16,6 +16,7 @@ VERBOSE = False
 DEBUG = False
 ID_LEN_NO_MODS = 5
 
+# parse arguments
 def parse_args():
 
     parser = argparse.ArgumentParser(description='Split SISSOR fragments with switch errors')
@@ -35,6 +36,7 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+# determine if two fragment objects overlap
 def overlap(f1, f2, amt=1):
 
     assert(f1.seq[0][0] <= f2.seq[0][0])
@@ -45,7 +47,22 @@ def overlap(f1, f2, amt=1):
 
     return len(inter) >= amt
 
+# given a VCF file from a single chromosome return the name of that chromosome
+def get_ref_name(vcf_file):
 
+    with open(vcf_file,'r') as infile:
+        for line in infile:
+            if line[0] == '#':
+                continue
+            elif len(line.strip().split('\t')) < 5:
+                continue
+            return line.strip().split('\t')[0]
+    # default
+    print("ERROR")
+    exit(1)
+
+# compute the total switch rate with respect to other fragments
+# this will be used to filter out highly discordant fragments
 def total_SER(f1, f2):
 
     assert(f1.seq[0][0] <= f2.seq[0][0])
@@ -91,6 +108,7 @@ def total_SER(f1, f2):
 
     return switches, total_pos
 
+# determine the breakpoints for a fragment being split based on allele mixture.
 def get_het_breakpoints(frag,min_het_count=3,max_het_frac=0.25):
 
     breaks = []
@@ -121,6 +139,7 @@ def get_het_breakpoints(frag,min_het_count=3,max_het_frac=0.25):
 
     return breakpos
 
+# split a fragment at clusters of mixed alleles (3 or more alleles with at least 25% calls being allele mixture
 def split_fragment_hets(frag,min_het_count=3,max_het_frac=0.25):
 
     breakpos = get_het_breakpoints(frag,min_het_count,max_het_frac)
@@ -260,6 +279,11 @@ def consistent(f1, f2, i,j, contam_bounds, t):
 
     return answer, contam_bounds
 
+# takes a list of fragment objects.
+# splits fragments where they have switch errors to other fragments
+# if the error is clearly in one fragment with respect to others (1 fragment against 2)
+# only then only split that one
+# otherwise split both fragments involved.
 def fragment_comparison_split(flist, threshold=3):
 
     flist = sorted(flist,key=lambda x: x.seq[0][0])
@@ -364,6 +388,8 @@ def fragment_comparison_split(flist, threshold=3):
 
     return new_flist
 
+# filter out fragments that have a very high total switch error rate to all other
+# overlapping fragments. these are likely to be contaminated with a mixture of haplotypes.
 def filter_discordant_fragments_SER(flist, SER_threshold):
 
     flist = sorted(flist,key=lambda x: x.seq[0][0])
@@ -394,6 +420,7 @@ def filter_discordant_fragments_SER(flist, SER_threshold):
 
     return new_flist
 
+# filter fragments based on their "fragment coverage". currently unused.
 def filter_fragment_coverage(flist,coverage):
 
     cov_counts = defaultdict(int)
@@ -426,6 +453,7 @@ def filter_fragment_coverage(flist,coverage):
 
     return filtered_flist
 
+# append the fragment ID with the new genomic positions defining the fragment boundaries, after contamination removal
 def add_new_boundaries(flist):
 
     for i in range(len(flist)):
@@ -450,6 +478,7 @@ def add_new_boundaries(flist):
 
     return flist
 
+# simply filter out 'M' (mixed) alleles but don't do anything to correct them.
 def filter_het_positions(flist):
 
     filtered_flist = []
@@ -473,12 +502,13 @@ def filter_het_positions(flist):
 
     return filtered_flist
 
-# NOT FOR WHOLE-GENOME VCFs
-# !!!!!!!!!!!!!!!!!!!!!!!!
+# this function is used to filter our BAC fragment file for VCFs found in another
+# dataset (PGP1f 60x WGS), for maximum confidence
 # NOT FOR WHOLE-GENOME VCFs
 def filter_on_VCF(flist, vcf_filter):
 
     vcf_set = set()
+    file_chrom = None # whole VCF file should have this chromosome.
     with open(vcf_filter,'r') as infile:
         for line in infile:
             if line[:1] == '#':
@@ -486,6 +516,13 @@ def filter_on_VCF(flist, vcf_filter):
             el = line.strip().split('\t')
             if len(el) < 5:
                 continue
+
+            vcf_chrom = el[0]
+            if file_chrom == None:
+                file_chrom = vcf_chrom
+            elif vcf_chrom != file_chrom:
+                print("ERROR, multi-chromosomal VCF.")
+                exit(1)
 
             genomic_pos = int(el[1])-1
             vcf_set.add(genomic_pos)
@@ -511,6 +548,17 @@ def filter_on_VCF(flist, vcf_filter):
 
     return filtered_flist
 
+# core function to remove contamination from SISSOR fragments before haplotyping
+# fragmentfile: haplotype fragments to process
+# vcf_file:     vcf_file fragmentfile is indexed by
+# outfile:      new processed fragment file
+# threshold:    define a switch error as this many switched SNVs in a row
+# min_coverage: filter positions for those with at least this much fragment SNV coverage.
+# mode:         'none' - remove 'M' labels but don't change fragments otherwise
+#               'basic' - only split fragments at possible switches
+#               'strict' - split fragments at switches, split fragments at clusters of mixed alleles,
+#                          and filter fragments with high numbers switches or mixed alleles
+#vcf_filter     for BAC reads -- filter the fragment list for genomic positions seen in this VCF. improves quality of reference haplotype.
 def fix_chamber_contamination(fragmentfile, vcf_file, outfile, threshold=2, min_coverage=0, mode='none', vcf_filter=None):
 
     # READ FRAGMENT MATRIX
@@ -561,6 +609,8 @@ def fix_chamber_contamination(fragmentfile, vcf_file, outfile, threshold=2, min_
     # WRITE TO FILE
     fragment.write_fragment_matrix(flist, outfile)
 
+# main function
+# parse input and run
 if __name__ == '__main__':
     args = parse_args()
     fix_chamber_contamination(args.fragments,args.vcf_file, args.output, args.threshold, args.min_cov, args.mode)

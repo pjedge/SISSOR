@@ -1,9 +1,7 @@
 from collections import defaultdict
 import os
 from math import log10
-#import sys
-from math import log10
-
+from file_processing import parse_bedfile
 
 cells = ['PGP1_21','PGP1_22','PGP1_A1']
 chambers = list(range(1,25))
@@ -20,27 +18,12 @@ chrom_num = dict()
 for i,chrom in enumerate(chroms):
     chrom_num[chrom] = i
 
-def parse_bedfile(input_file):
-
-    boundaries = []
-    with open(input_file,'r') as inf:
-        for line in inf:
-
-            if len(line) < 3:
-                continue
-
-            el = line.strip().split('\t')
-
-            chrom = el[0]
-            start = int(el[1])
-            end = int(el[2])
-
-            boundaries.append((chrom, start, end))
-
-    return boundaries
-
 short_chrom_names = set([str(x) for x in range(1,23)]+['X','Y'])
 chrom_names = set(['chr'+str(x) for x in range(1,23)]+['chrX','chrY'])
+
+# create a HapCUT2 style fragment matrix from chamber calls
+# put 'M' in positions with mixed allele calls for later processing
+# (we will remove them and split the fragments at these contamination positions)
 
 def format_chrom(chrom_str):
     if chrom_str in short_chrom_names:
@@ -48,7 +31,7 @@ def format_chrom(chrom_str):
     assert(chrom_str in chrom_names)
     return chrom_str
 
-def create_hapcut_fragment_matrix_CCF(chamber_call_file, variant_vcf_files, fragment_boundary_files, output_dir):
+def create_hapcut_fragment_matrix(chamber_call_file, variant_vcf_files, fragment_boundary_files, output_dir):
 
     fragment_boundaries = []
     for i in range(0,n_cells*n_chambers):
@@ -105,19 +88,6 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file, variant_vcf_files, frag
 
             if call == '*':
                 continue
-
-            #el2 = call.split(';')
-
-            #genotype_prob = -1
-            #max_genotype = 'NN'
-            #for entry in el2:
-
-            #    genotype, prob = entry.split(':')
-            #    prob = float(prob)
-
-            #    if prob > genotype_prob:
-            #        genotype_prob = prob
-            #        #max_genotype = genotype
 
             base_call_list = [x for x in ccf_line[5:80] if 'CELL' not in x]
 
@@ -206,11 +176,6 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file, variant_vcf_files, frag
                 elif max_allele == {variant_allele}:
                     binary_allele = '1'
 
-                #p_err = 1 - max_prob
-                #if p_err < 1e-10:
-                #    p_err = 1e-10
-                #qual = int(-10 * log10(p_err))
-
                 qual = int(-10*log10(1.0-max_prob)) if 1.0-max_prob > 0 else MAX_QUAL
                 if qual > MAX_QUAL:
                     qual = MAX_QUAL
@@ -277,4 +242,4 @@ def create_hapcut_fragment_matrix_CCF(chamber_call_file, variant_vcf_files, frag
         print("WARNING: there were {} positions with inconsistent reference alleles between CCF file and VCF.".format(inconsistent_ref_alleles))
 
 if __name__ == '__main__':
-    create_hapcut_fragment_matrix_CCF()
+    create_hapcut_fragment_matrix()

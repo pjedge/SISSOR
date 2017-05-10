@@ -8,9 +8,9 @@ import base_calls_to_vcf
 import fragment_haplotype_assignment
 from itertools import product
 #sys.path.append('/home/pedge/git/HapTools')
-import fileIO
+from file_processing import prune_hapblock_file, filter_wgs_vcf, split_vcf
 from plot_sissor import plot_sissor
-from create_hapcut_fragment_matrix_CCF import create_hapcut_fragment_matrix_CCF
+from create_hapcut_fragment_matrix import create_hapcut_fragment_matrix
 from fix_chamber_contamination import fix_chamber_contamination
 import generate_tables
 #import run_tools
@@ -65,9 +65,9 @@ BAC_VCFs = ['/path/to/BAC_library1.vcf','/path/to/BAC_library2.vcf'] #['/home/wk
 #'/home/wkchu/BACPoolPileup/Indx96.bac.pileup.vcf']
 
 # path to directories with the 3 SISSOR Library BAM files.
-PGP1_21_dir = '/path/to/SISSOR_library1_dir' #'/oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/BAM'
-PGP1_22_dir = '/path/to/SISSOR_library2_dir' #'/oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/2016OctMergedBAM'
-PGP1_A1_dir = '/path/to/SISSOR_library3_dir' #'/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/2016OctMergedBAM'
+#PGP1_21_dir = '/path/to/SISSOR_library1_dir' #'/oasis/tscc/scratch/wkchu/SISSOR/PGP1_21_highoutputmem/BAM'
+#PGP1_22_dir = '/path/to/SISSOR_library2_dir' #'/oasis/tscc/scratch/wkchu/SISSOR/PGP1_22/2016OctMergedBAM'
+#PGP1_A1_dir = '/path/to/SISSOR_library3_dir' #'/oasis/tscc/scratch/wkchu/SISSOR/PGP1_A1/2016OctMergedBAM'
 
 # cutoff values are phred scaled probability of error
 # so 30 => 0.999 accuracy
@@ -314,7 +314,7 @@ rule split_freebayes_wgs:
     run:
         outfiles   = ['wgs/freebayes_hg19/{}.{}.{}.vcf'.format(chrom,start,end) for (chrom,start,end) in chunklist if chrom == wildcards.c]
         chr_chunks = [(chrom,start,end) for (chrom,start,end) in chunklist if chrom == wildcards.c]
-        caca.split_vcf(input.vcf, chr_chunks, outfiles)
+        split_vcf(input.vcf, chr_chunks, outfiles)
 
 # combine, and sort, the lifted over VCFs for PGP1f WGS SNV/ref calls for every genomic position
 rule sort_freebayes_wgs:
@@ -474,7 +474,7 @@ rule prune_haplotype:
         hapblocks = expand("{E}/hapcut2_{{s}}/{{x}}/{c}.output",E=HAPLOTYPE_EXP_DIR,c=chroms)
     run:
         for i, o in zip(input.hapblocks,output.hapblocks):
-            fileIO.prune_hapblock_file(i, o, snp_conf_cutoff=0.95, split_conf_cutoff=0.95, use_refhap_heuristic=True) #split_conf_cutoff=0.9999
+            prune_hapblock_file(i, o, snp_conf_cutoff=13.01, split_conf_cutoff=13.01, use_refhap_heuristic=True) #split_conf_cutoff=0.9999
 
 # Run HapCUT2 to assemble haplotypes from SISSOR fragments (raw fragments and post-processed fragments to compare completeness and accuracy)
 rule run_hapcut2:
@@ -529,7 +529,7 @@ rule generate_fragmatrix:
     run:
         odir = 'haplotyping/data/PGP1_ALL/augmented_fragmat'
         # generate fragment matrix from sissorhands base calls
-        create_hapcut_fragment_matrix_CCF(chamber_call_file=input.ccf, variant_vcf_files=input.vcfs,fragment_boundary_files=input.bounds, output_dir=odir)
+        create_hapcut_fragment_matrix(chamber_call_file=input.ccf, variant_vcf_files=input.vcfs,fragment_boundary_files=input.bounds, output_dir=odir)
 
 # combine the filtered "chamber call files" into one file.
 # the calls in this file will be used to generate HapCUT2 fragment matrix files
@@ -592,7 +592,7 @@ rule prune_BAC:
         hapblocks = expand("haplotyping/data/BAC/{c}.filtered",c=chroms)
     run:
         for i, o in zip(input.hapblocks,output.hapblocks):
-            fileIO.prune_hapblock_file(i, o, snp_conf_cutoff=0.9999, split_conf_cutoff=0.9999, use_refhap_heuristic=True) #split_conf_cutoff=0.9999
+            prune_hapblock_file(i, o, snp_conf_cutoff=40, split_conf_cutoff=40, use_refhap_heuristic=True) #split_conf_cutoff=0.9999
 
 # run HapCUT2 to assemble high-confidence reference BAC haplotype.
 rule run_hapcut2_BAC:
@@ -618,7 +618,7 @@ rule fix_fragmat_BAC:
     input:
         var_vcfs = "%s/{c}.vcf" % BAC_VCF_dir,
         frags = "haplotyping/data/BAC_frags/{c}",
-        #WGS_variants = "%s/{c}.vcf" % haplotyping_VCF_dir,
+        WGS_variants = "%s/{c}.vcf" % haplotyping_VCF_dir,
     output:
         fixed = "haplotyping/data/BAC_frags_fixed/{c}"
     run:
@@ -640,7 +640,7 @@ rule filter_haplotyping_VCFs:
     input: vcf = "wgs/wgs_hg19.vcf"
     output: vcfs = expand("haplotyping/data/haplotyping_VCFs/{c}.vcf",c=chroms)
     run:
-        filter_vcf.filter_wgs_vcf(input.vcf,output.vcfs,chroms) # input.filter_set
+        filter_wgs_vcf(input.vcf,output.vcfs,chroms) # input.filter_set
 
 # sort the variants that we'll use for phasing.
 rule sort_wgs_SNPs:
@@ -788,12 +788,12 @@ rule bam2sam:
     shell: '{SAMTOOLS} view -h {input} > {output}'
 
 # simlink data to make path naming scheme consistent between PGP1_21 and PGP1_22
-rule simlinks:
-    run:
-        for ch,chpad in zip(chambers,chambers_pad):
-            shell('''
-            mkdir -p bams/PGP1_21 bams/PGP1_22 bams/PGP1_A1
-            ln -s {PGP1_21_dir}/PGP1_21_ch{chpad}.sorted.chr.bam bams/PGP1_21/ch{ch}.bam
-            ln -s {PGP1_22_dir}/PGP1_22_ch{chpad}.sorted.bam bams/PGP1_22/old.ch{ch}.bam
-            ln -s {PGP1_A1_dir}/PGP1_A1_ch{chpad}.sorted.bam bams/PGP1_A1/old.ch{ch}.bam
-            ''')
+#rule simlinks:
+#    run:
+#        for ch,chpad in zip(chambers,chambers_pad):
+#            shell('''
+#            mkdir -p bams/PGP1_21 bams/PGP1_22 bams/PGP1_A1
+#            ln -s {PGP1_21_dir}/PGP1_21_ch{chpad}.sorted.chr.bam bams/PGP1_21/ch{ch}.bam
+#            ln -s {PGP1_22_dir}/PGP1_22_ch{chpad}.sorted.bam bams/PGP1_22/old.ch{ch}.bam
+#            ln -s {PGP1_A1_dir}/PGP1_A1_ch{chpad}.sorted.bam bams/PGP1_A1/old.ch{ch}.bam
+#            ''')

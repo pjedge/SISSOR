@@ -13,6 +13,9 @@ mpl.rc('axes', labelsize=13)
 mpl.rcParams.update({'font.size': 13})
 mpl.rc('lines', linewidth=3)
 
+# this function takes data in the form of error_result objects from the calculate_haplotype_statistics class,
+# and creates a neat bar chart of genomewide haplotype error rates and completeness metrics.
+
 def plot_sissor(data,labels, outname):
     plt.figure(figsize=(10,5))
     ax = plt.subplot(121)

@@ -1,17 +1,11 @@
 from __future__ import print_function
 import argparse
 import itertools
-
 from math import log10
-#from pdb import set_trace
-#if False:
-#    set_trace() # to dodge warnings that pdb isn't being used.
 import time
 import pickle
 from collections import defaultdict
-import common
-
-#from numpy import logaddexp as addlogs
+from file_processing import parse_bedfile, parse_mpileup_base_qual
 
 def addlogs(a,b):
     if a > b:
@@ -49,43 +43,23 @@ for i,chrom in enumerate(chroms):
     chr_num[chrom] = i
 
 ###############################################################################
-# DEFAULTS...
-###############################################################################
-
-default_input_file = 'big_pileup.txt'#'pileup_example.txt'#'test_subsample.txt'
-default_output_file =  'output.txt'#'test_subsample.output'
-
-default_fragment_boundaries = None
-#default_fragment_boundaries = []
-#for cell in cells:
-#    for chamber in chambers:
-#        filename = 'fragment_boundary_beds/{}/ch{}.bed'.format(cell,chamber)
-#        default_fragment_boundaries.append(filename)
-
-
-###############################################################################
 # PARSE STDIN
 ###############################################################################
-
 
 def parseargs():
 
     parser = argparse.ArgumentParser(description=desc)
-    parser.add_argument('-i', '--input_file', nargs='?', type = str, help='input file, pileup with n cells x 24 chambers', default=default_input_file)
-    parser.add_argument('-o', '--output_file', nargs='?', type = str, help='file to write output to', default=default_output_file)
+    parser.add_argument('-i', '--input_file', nargs='?', type = str, help='input file, pileup with n cells x 24 chambers', default=None)
+    parser.add_argument('-o', '--output_file', nargs='?', type = str, help='file to write output to', default=None)
     parser.add_argument('-b', '--fragment_boundaries', nargs='+', type = str, help='', default=None)
     parser.add_argument('-n', '--num_cells', nargs='?', type = int, help='number of cells being analyzed, default: 3', default=3)
 
     args = parser.parse_args()
     return args
 
-
 ###############################################################################
 # PARAMETERS
 ###############################################################################
-
-## INITIALIZED AS None TO ENSURE GLOBAL ACCESS
-## READ THEM IN LATER USING initialize_parameters() FUNCTION
 
 p_null = pickle.load(open("{}/p_null.p".format(parameters_dir), "rb" )) # estimated p_null, the probability of a strand not being sampled.
 MDA_dist = pickle.load(open("{}/MDA_dist.p".format(parameters_dir), "rb" )) # distribution of observed MDA error
@@ -96,9 +70,6 @@ het_config_probs = pickle.load(open( "parameters/het_config_probs.p", "rb"))
 diploid_genotype_priors = pickle.load(open( "parameters/diploid_genotype_priors.p", "rb"))
 haploid_genotype_priors = pickle.load(open( "parameters/haploid_genotype_priors.p", "rb"))
 
-#omega = pickle.load(open( "parameters/omega.p", "rb")) # per-base probability of MDA error
-#omega_nolog = 10**omega
-
 MDA_ERR = 1e-5 # the probability of consensus error due to MDA
 MDA_COR = log10(1 - MDA_ERR)
 MDA_ERR = log10(MDA_ERR) - log10(3) # the log probability of an MDA error, divided by 3
@@ -106,40 +77,37 @@ MDA_ERR = log10(MDA_ERR) - log10(3) # the log probability of an MDA error, divid
 NUM_BINS = 20
 COV_INTERVAL = 10
 
-#INTRACELL_HAP_PENALTY = log10(1e-10) # intra-cell penalty for assigning chambers of different haps to same haps
-#INTERCELL_HAP_PENALTY = log10(1e-10) # inter-cell penalty for assigning chambers of different haps to same haps
-
-# cov_frac_dist numbers are goofy at lower coverage so just make them uniform
-#for i in range(1,15):
-#    cov_frac_dist[i] = [1/i]*i
-
+# a heuristic for finding filtering mismapped positions, CNV, other issues.
+# if the same mixture of alleles (e.g. 'A'+'T') is observed in two separate libraries
+# above a threshold then there is likely a systemic issue like this
+# MDA error should be random and strand-overlap shouldn't happen in multiple chambers often.
 def same_mixture_occurs_twice(base_data,nonzero_chambers):
 
     mixtures_seen = set()
 
     for cell in range(0,n_cells):  # for each cell
         for chamber in nonzero_chambers[cell]:
-            
+
             pileup = base_data[cell][chamber]
             counter = defaultdict(int)
             for base in pileup:
                 counter[base] += 1
-    
+
             bases_seen = set()
             for base, v in counter.items():
                 if v >= 3:
                     bases_seen.add(base)
-    
+
             if len(bases_seen) >= 3:
                 return True
-    
+
             elif len(bases_seen) == 2:
-    
+
                 mixture_str = ''.join(sorted(list(bases_seen)))
-    
+
                 if mixture_str in mixtures_seen:
                     return True
-    
+
                 mixtures_seen.add(mixture_str)
 
     return False
@@ -229,7 +197,8 @@ def multicell_config(het,nonzero_chambers):
 ###############################################################################
 
 # PRIOR PROBABILITY OF SEEING ALLELES MIXED IN A GIVEN PROPORTION IN A CHAMBER
-# accessed as mixed_allele_priors[x][y]
+# accessed as mixed_allele_priors[r][x][y]
+# r is the reference allele
 # where x is the number of chambers with reads
 # and y is the allele mixture as an alphabetically sorted tuple
 def compute_mixed_allele_priors():
@@ -276,6 +245,8 @@ def compute_mixed_allele_priors():
 
     return mixed_allele_priors
 
+# create dictionaries that pre-compute some probabilities
+# to speed up likelihood calculations for read base data observed in a chamber
 one_allele_cache = dict()
 two_allele_cache = dict()
 def compute_caches():
@@ -287,11 +258,6 @@ def compute_caches():
                         qual = 10**((q - 33) * -0.1)
                         frac = i / j if i > 1 else 1e-10
 
-                        #x1 = (1.0-qual)*(1.0-omega_nolog) + omega_nolog*qual
-                        #x2 = omega_nolog*(1.0-qual) + (1-omega_nolog)*qual
-                        #p1 = x1 if a1_match else x2
-                        #p2 = x1 if a2_match else x2
-                        #two_allele_cache[((i / j),qual,a1_match,a2_match)] = log10(frac*p1 + (1-frac)*p2)
                         x1 = 1.0-qual
                         x2 = qual
                         p1 = x1 if a1_match else x2
@@ -307,6 +273,14 @@ def compute_caches():
 
 compute_caches()
 
+# compute the probability of the read data in a single chamber,
+# given that the alleles actually present in the chamber are alleles_present.
+# base_data[i][j] contains the base pileup for cell i chamber j
+# qual_data[i][j] contains the quality scores for cell i chamber j
+# fast_mode is a parameter to speed up on positions that have only a couple variant bases observed,
+#    so they are almost certainly reference calls. It considers simple 50% odds for
+#    observing a given allele when there are overlapped strands in the same chamber,
+#   rather than summing over a complete estimated distrbution.
 def pr_one_chamber_data(alleles_present, base_data, qual_data, fast_mode):
 
 
@@ -363,6 +337,7 @@ def pr_one_chamber_data(alleles_present, base_data, qual_data, fast_mode):
 
     return p
 
+# pr_one_ch[(i,j,(a,b))] is a precomputed dictionary. It returns the probability that cell i, chamber j, has allele (a,b) present (may be a single base, or a mixture from contamination)
 def precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers, fast_mode):
 
     pr_one_ch = dict()
@@ -407,13 +382,18 @@ def precompute_pr_one_chamber(base_data, qual_data, nonzero_chambers, fast_mode)
 
     return pr_one_ch
 
-# probability that *possible mixed* allele is present to chamber
-# allele:    mixed-allele in tuple form that we are testing in chamber
-# chamber:   chamber that we are testing for presence of allele in (0-23)
-# base_data: list length 24, containing 1 list per chamber. inner list has base pairs called in chamber.
-# qual_data: list length 24, containing 1 list per chamber. inner list has q values (p(base call error)) callin in chamber.
-# configs:   list of configurations and their probabilities, see earlier
+# core of the SISSORhands approach
+# compute the probability that each allele is present, by computing the probability of
+# each genotype with a bayesian calculation.
+# to calculate the likelihood of data, sum over all possible events of DNA strands
+# being distributed to SISSOR reaction chambers for amplification.
 
+# pr_one_ch[(i,j,(a,b))] is a precomputed dictionary. It returns the probability that cell i, chamber j, has allele (a,b) present (may be a single base, or a mixture from contamination)
+# nonzero_chambers[i] is a list of chambers for cell i that have data present
+# mixed_allele_priors is a dictionary containing prior probability for a given mixture of alleles in a chamber. This is basically not used at all since the solo-chamber calls are not being used.
+# ref_allele is the reference allele at the position we are calling
+# condensed_genotype_set is a restricted set of genotypes. This parameter is currently not used at all, but can be used to limit the set of genotypes being considered, for a performance speedup.
+# haploid is True if this is chrX or chrY and false otherwise.
 def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, condensed_genotype_set, haploid):
 
     probs = dict()
@@ -424,15 +404,15 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
     genotype_set = diploid_genotypes if condensed_genotype_set == None else condensed_genotype_set
 
     for G in genotype_set:
-        
+
         configs = hom_het_configs[0] if G[0] == G[1] else hom_het_configs[1]
         p_total = tinylog
 
         if haploid:
             configs = hom_het_configs[1] # spoofed as heterozygous
-            if G[0] != G[1]: # only consider 
-                continue 
-            
+            if G[0] != G[1]: # only consider
+                continue
+
 
         for config in configs:
 
@@ -446,7 +426,7 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
                     if not (c3 == n_chambers and c4 == n_chambers):
                         skip = True
                         break
-                        
+
                 if skip:
                     continue
 
@@ -520,66 +500,16 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
 
                     assignments.add((i,j,alleles_present))
 
-
-            ########### NEW, 10/13/2016 #######################################
-
-            '''
-            known_same_hap = {}#{((0,1),(0,2))}
-            known_diff_hap = {}#{((0,1),(1,0)),((0,2),(1,0))}
-
-            config_same_hap = set()
-            config_diff_hap = set()
-
-            for cell_a in range(0,n_cells):
-                cell_a_chambers, p_cell_a_cfg = config[cell_a]
-
-                for cell_b in range(0,n_cells):
-                    cell_b_chambers, p_cell_a_cfg = config[cell_a]
-
-                    for y1,x1 in enumerate(cell_a_chambers):
-                        for y2,x2 in enumerate(cell_b_chambers):
-
-                            if x1 == n_chambers or x2 == n_chambers: # assignments to null chamber (not sampled)
-                                continue
-
-                            if cell_a == cell_b and y1 == y2:
-                                continue
-
-                            if (y1 < 2 and y2 < 2) or (y1 >= 2 and y2 >= 2):
-                                config_same_hap.add(((cell_a,x1),(cell_b,x2))) # says "configuration places these cells/chambers in the same haplotype"
-                            else:
-                                config_diff_hap.add(((cell_a,x1),(cell_b,x2)))# says "configuration places these cells/chambers in different haplotype"
-
-
-            for pair in known_same_hap:
-                if pair in config_diff_hap: #not in config_same_hap:
-                    if pair[0][0] == pair[1][0]: # same cell
-                        p += -1000#INTRACELL_HAP_PENALTY
-                    else: # different cell
-                        p += -1000#INTERCELL_HAP_PENALTY
-
-            for pair in known_diff_hap:
-                if pair not in config_diff_hap:
-                    if pair[0][0] == pair[1][0]: # same cell
-                        p += -1000#INTRACELL_HAP_PENALTY
-                    else: # different cell
-                        p += -1000#INTERCELL_HAP_PENALTY
-
-            #print(config_same_hap)
-            #print(config_diff_hap)
-            '''
-            ###################################################################
-
             p_total = addlogs(p_total, p) # update genotype likelihood sum
 
             for assignment in assignments:
-                
+
                 if not haploid:
                     p_assignment[assignment] = addlogs(p_assignment[assignment], p + diploid_genotype_priors[ref_allele][G])
                 else:
                     p_assignment[assignment] = addlogs(p_assignment[assignment], p + haploid_genotype_priors[ref_allele][G[0]])
-                
-        
+
+
         if not haploid:
             probs[G] = p_total + diploid_genotype_priors[ref_allele][G]
         else:
@@ -594,7 +524,7 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
     max_posterior = -1
     max_G = ('N','N')
     allele_count = defaultdict(lambda: tinylog)
-    
+
     current_genotypes = diploid_genotypes if not haploid else haploid_genotypes
     for G in current_genotypes:
         if G in probs:
@@ -620,6 +550,7 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
     outline_el[1] = gen_str
 
 
+    # determine most likely allele in each chamber, in light of information from other chambers
 
     for cell in range(0,n_cells):  # for each cell
         for chamber in nonzero_chambers[cell]:
@@ -657,7 +588,8 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
             outline_el[3 + cell + cell*n_chambers + chamber] = out_str
 
 
-    # "Basic" base calling, no cross-chamber info
+    # determine most likely allele in each chamber, IGNORING information from other chambers
+    # this is not used in any way in the SISSOR manuscript
 
     for cell in range(0,n_cells):  # for each cell
         for chamber in nonzero_chambers[cell]:
@@ -699,27 +631,12 @@ def pr_genotype(pr_one_ch, nonzero_chambers, mixed_allele_priors, ref_allele, co
 # MAIN FUNCTION AND PARSING
 ###############################################################################
 
-def parse_bedfile(input_file):
-
-    boundaries = []
-    with open(input_file,'r') as inf:
-        for line in inf:
-
-            if len(line) < 3:
-                continue
-
-            el = line.strip().split('\t')
-
-            chrom = el[0]
-            start = int(el[1])
-            stop  = int(el[2])
-
-            boundaries.append((chrom, start, stop))
-
-    return boundaries
-
-# boundary_files[cell*chamber+chamber] should hold name of bed file with fragment boundaries
-# use no_cross_chamber_info to ignore cross-chamber information
+# given an mpileup file over N cells x 24 SISSOR libraries, calls the most likely
+# consensus allele as well as the most likely allele in each chamber
+# input file is a samtools mpileup file
+# output is a special format ("chamber call file") that has a consensus allele probabilities,
+#  probabilities for each allele in each chamber at each genomic position,
+# as well as a cleaned up version of the original pileups and various tags.
 def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only=False):
 
     if boundary_files != None:
@@ -794,7 +711,7 @@ def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only
                     raw_bd = el[col_ix + 1]
                     raw_qd = el[col_ix + 2]
 
-                    bd, qd, ic = common.parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
+                    bd, qd, ic = parse_mpileup_base_qual(raw_bd, raw_qd, ref_base)
 
                     indel_count += ic
 
@@ -843,10 +760,10 @@ def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only
                 for chamber in nonzero_chambers[cell]:
 
                     basecounts = defaultdict(int)
-                    
+
                     if len(base_data[cell][chamber]) < 3: # we can expect some weirdness at low coverage
                         continue
-                    
+
                     for base in base_data[cell][chamber]:
                         basecounts[base] += 1
 
@@ -889,6 +806,8 @@ def call_chamber_alleles(input_file, output_file, boundary_files=None, SNPs_only
 
             processed += 1
 
+# main function
+# parse input and run function to call alleles
 if __name__ == '__main__':
     t1 = time.time()
     args = parseargs()
