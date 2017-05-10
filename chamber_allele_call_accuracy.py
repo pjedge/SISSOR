@@ -254,13 +254,13 @@ def generate_ref_dict(GFF_file, WGS_VCF_file, BAC_VCF_files, HG19, region, ref_d
 
 
 
-    count_dump = ref_dict_pickle + '.TOTAL_COUNT'
-    with open(count_dump,'w') as outf:
-        print(TOTAL_POS,file=outf)
+    #count_dump = ref_dict_pickle + '.TOTAL_COUNT'
+    #with open(count_dump,'w') as outf:
+    #    print(TOTAL_POS,file=outf)
 
-    snp_dump = ref_dict_pickle + '.SNP_COUNT'
-    with open(snp_dump,'w') as outf:
-        print(TOTAL_SNP,file=outf)
+    #snp_dump = ref_dict_pickle + '.SNP_COUNT'
+    #with open(snp_dump,'w') as outf:
+    #    print(TOTAL_SNP,file=outf)
 
 
     pickle.dump(ref_dict,open(ref_dict_pickle,'wb'))
